@@ -1,9 +1,10 @@
 #include <mpi.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <time.h>
 #include <stdbool.h>
 
-#define NODE_COUNT 3
+#define NODE_COUNT 100
 
 /**
  * Used to log a message
@@ -20,7 +21,30 @@ void log_message(int process_id, char *message)
 
 int **fill_graph()
 {
-    // TODO fill graph
+    int **matrix = (int **)malloc(NODE_COUNT * sizeof(int *));
+    for (int i = 0; i < NODE_COUNT; i++)
+    {
+        matrix[i] = (int *)malloc(NODE_COUNT * sizeof(int));
+    }
+
+    int i = 0;
+    for (i; i < NODE_COUNT; i++)
+    {
+        int j = 0;
+        for (j; j < NODE_COUNT; j++)
+        {
+            if (i == j)
+            {
+                matrix[i][j] = 101;
+            }
+            else
+            {
+                matrix[i][j] = rand() % 100;
+            }
+        }
+    }
+
+    return matrix;
 }
 
 /**
@@ -36,7 +60,7 @@ int find_lightest_edge(int **graph, int node_id)
         int act = graph[node_id][i];
         if (act < min)
         {
-            act = min;
+            min = act;
             min_id = i;
         }
     }
@@ -44,17 +68,17 @@ int find_lightest_edge(int **graph, int node_id)
     return min_id;
 }
 
-int *find_min(int *values)
+int find_min_indx(int *nodes_id, int **graph)
 {
     int i = 1;
-    int min = values[0];
+    int min = graph[0][nodes_id[0]];
     int min_id = 0;
     for (i; i < NODE_COUNT; i++)
     {
-        int act = values[i];
-        if (min == NULL | act < min)
+        int act = graph[i][nodes_id[i]];
+        if (act < min)
         {
-            act = min;
+            min = act;
             min_id = i;
         }
     }
@@ -67,7 +91,7 @@ int *find_min(int *values)
  * This function returns an array containing the results of the nodes, having the result of
  * node i in index i
  */
-int *update_all_nodes(int value, int node_id)
+void update_all_nodes(int value, int node_id, int *recvbuff)
 {
     int sendbuff[NODE_COUNT];
     // the send buff contains in every index, the data to be sent to the process with that index
@@ -81,27 +105,24 @@ int *update_all_nodes(int value, int node_id)
     }
 
     // recvbuff will contain in every index the value that has been received by the process with that index
-    int recvbuff[NODE_COUNT];
 
-    printf("Nodeid: %d my values: %d,%d,%d\n", node_id, sendbuff[0], sendbuff[1], sendbuff[2]);
+    printf("Nodeid: %d my values: %d,%d,%d,%d\n", node_id, sendbuff[0], sendbuff[1], sendbuff[2], sendbuff[3]);
     MPI_Alltoall(sendbuff, 1, MPI_INT, recvbuff, 1, MPI_INT, MPI_COMM_WORLD);
-    printf("Nodeid: %d received values: %d,%d,%d\n", node_id, recvbuff[0], recvbuff[1], recvbuff[2]);
-
-    return recvbuff;
+    printf("Nodeid: %d received values: %d,%d,%d,%d\n", node_id, recvbuff[0], recvbuff[1], recvbuff[2], recvbuff[3]);
 }
 
 /**
  * Update the min graph with the min values received by the nodes.
  * The min_values array should be of length NODE_COUNT, and contain one value for each index
  */
-void update_min_graph(int *min_values, bool **min_graph)
+void update_min_graph(int *min_values, int **min_graph)
 {
     int i = 0;
     for (i; i < NODE_COUNT; i++)
     {
         int act = min_values[i];
         // Setting to true means that that edge is included
-        min_graph[i][act] = true;
+        min_graph[i][act] = 1;
     }
 }
 
@@ -111,15 +132,31 @@ void update_min_graph(int *min_values, bool **min_graph)
  */
 void find_component(bool *nodes_in_component, int node_id, int **min_graph)
 {
-    // TODO: test
+    nodes_in_component[node_id] = true;
+    // printf("component: %d,%d,%d,%d\n", nodes_in_component[0], nodes_in_component[1], nodes_in_component[2], nodes_in_component[3]);
+    //  TODO: test
     int i = 0;
 
     for (i; i < NODE_COUNT; i++)
     {
-        if (min_graph[node_id][i])
+        if (min_graph[node_id][i] == 1)
         {
-            nodes_in_component[i] = true;
-            find_component(nodes_in_component, i, min_graph);
+            // printf("found\n");
+            if (!nodes_in_component[i])
+            {
+                find_component(nodes_in_component, i, min_graph);
+            }
+            else
+            {
+                int j = 0;
+                for (j; j < NODE_COUNT; j++)
+                {
+                    if (!nodes_in_component[j])
+                    {
+                        find_component(nodes_in_component, j, min_graph);
+                    }
+                }
+            }
             return;
         }
     }
@@ -164,6 +201,39 @@ bool is_connected(bool *component_nodes)
     return true;
 }
 
+int **allocate_and_init_matrix()
+{
+    int **min_graph = (int **)malloc(NODE_COUNT * sizeof(int *));
+    for (int i = 0; i < NODE_COUNT; i++)
+    {
+        min_graph[i] = (int *)malloc(NODE_COUNT * sizeof(int));
+    }
+
+    int i = 0;
+    for (i; i < NODE_COUNT; i++)
+    {
+        int j = 0;
+        for (j; j < NODE_COUNT; j++)
+        {
+            min_graph[i][j] = 0;
+        }
+    }
+    return min_graph;
+}
+
+void print_matrix(int **matrix)
+{
+    // Print the adjacency matrix
+    for (int i = 0; i < NODE_COUNT; i++)
+    {
+        for (int j = 0; j < NODE_COUNT; j++)
+        {
+            printf("%d ", matrix[i][j]);
+        }
+        printf("\n");
+    }
+}
+
 int main(int argc, char **argv)
 {
     MPI_Init(NULL, NULL);
@@ -179,30 +249,57 @@ int main(int argc, char **argv)
     log_message(world_rank, "Started");
 
     int **graph = fill_graph();
-    bool min_graph[NODE_COUNT][NODE_COUNT];
+    int **min_graph = allocate_and_init_matrix();
+
+    print_matrix(graph);
+
+    print_matrix(min_graph); // something rotto
+
+    int count = 0;
 
     while (true)
     {
         int lightest = find_lightest_edge(graph, world_rank);
+        printf("lightest %d: %d\n", world_rank, lightest);
 
-        int *recv_values[NODE_COUNT] = update_all_nodes(world_rank, world_rank);
-        update_min_graph(recv_values, min_graph);
+        int *recv_values = malloc(NODE_COUNT * sizeof(int));
+
+        update_all_nodes(lightest, world_rank, recv_values);
+
+        // TODO: if second iteration choose the lightest among the one selected by the nodes
+        if (count != 0)
+        {
+            int min_id = find_min_indx(recv_values, graph);
+            int min_dest = recv_values[min_id];
+            min_graph[min_id][min_dest] = 1;
+        }
+        else
+        {
+            update_min_graph(recv_values, min_graph);
+        }
+
+        print_matrix(min_graph);
+        free(recv_values);
 
         // this array tells which nodes are part of the component of this node
-        bool *component_nodes[NODE_COUNT];
+        bool component_nodes[NODE_COUNT];
 
-        // TODO: find nodes that are part of this node component
-        // TODO (optional): prune the graph by removing edges between nodes of the same component
-        // TODO: find lightest edge again, but not to nodes of the same component
+        // find nodes that are part of this node component
         find_component(component_nodes, world_rank, min_graph);
 
+        // printf("component: %d,%d,%d,%d\n", component_nodes[0], component_nodes[1], component_nodes[2], component_nodes[3]);
+
+        // check if there is a single component (algorithm has finished)
         if (is_connected(component_nodes))
         {
+            printf("%d is connected\n", world_rank);
             break;
         }
 
+        // prune the graph by removing edges between nodes of the same component (needed for finding lightest edge)
         prune_graph(component_nodes, graph);
-        break; // TODO: remove
+
+        count++;
     }
 
     // Finalize the MPI environment. No more MPI calls can be made after this
