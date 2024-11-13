@@ -105,6 +105,65 @@ void update_min_graph(int *min_values, bool **min_graph)
     }
 }
 
+/**
+ * Searches for the nodes that are part of the same component of the given node.
+ * NOTE: this function exploits the fact that the min graph has nodes connected at most 1 time, so there are no cycles
+ */
+void find_component(bool *nodes_in_component, int node_id, int **min_graph)
+{
+    // TODO: test
+    int i = 0;
+
+    for (i; i < NODE_COUNT; i++)
+    {
+        if (min_graph[node_id][i])
+        {
+            nodes_in_component[i] = true;
+            find_component(nodes_in_component, i, min_graph);
+            return;
+        }
+    }
+}
+
+/**
+ * Prunes the given graph from the edges between the same component
+ */
+void prune_graph(bool *nodes_in_component, int **graph)
+{
+    int i = 0;
+    for (i; i < NODE_COUNT; i++)
+    {
+        bool act = nodes_in_component[i];
+        if (act)
+        {
+            int j = 0;
+            for (j; j < NODE_COUNT; j++)
+            {
+                if (nodes_in_component[j])
+                {
+                    graph[act][j] = 0;
+                }
+            }
+        }
+    }
+}
+
+/**
+ * Check wheter the algorithm finished
+ */
+bool is_connected(bool *component_nodes)
+{
+    int i = 0;
+    for (i; i < NODE_COUNT; i++)
+    {
+        if (!component_nodes[i])
+        {
+            return false;
+        }
+    }
+    return true;
+}
+
 int main(int argc, char **argv)
 {
     MPI_Init(NULL, NULL);
@@ -119,13 +178,32 @@ int main(int argc, char **argv)
 
     log_message(world_rank, "Started");
 
-    // int** graph = fill_graph();
+    int **graph = fill_graph();
     bool min_graph[NODE_COUNT][NODE_COUNT];
 
-    // int lightest = find_lightest_edge(graph, world_rank);
+    while (true)
+    {
+        int lightest = find_lightest_edge(graph, world_rank);
 
-    int *recv_values[NODE_COUNT] = update_all_nodes(world_rank, world_rank);
-    update_min_graph(recv_values, min_graph);
+        int *recv_values[NODE_COUNT] = update_all_nodes(world_rank, world_rank);
+        update_min_graph(recv_values, min_graph);
+
+        // this array tells which nodes are part of the component of this node
+        bool *component_nodes[NODE_COUNT];
+
+        // TODO: find nodes that are part of this node component
+        // TODO (optional): prune the graph by removing edges between nodes of the same component
+        // TODO: find lightest edge again, but not to nodes of the same component
+        find_component(component_nodes, world_rank, min_graph);
+
+        if (is_connected(component_nodes))
+        {
+            break;
+        }
+
+        prune_graph(component_nodes, graph);
+        break; // TODO: remove
+    }
 
     // Finalize the MPI environment. No more MPI calls can be made after this
     MPI_Finalize();
