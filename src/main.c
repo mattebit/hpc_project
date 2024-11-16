@@ -5,9 +5,9 @@
 #include <stdbool.h>
 #include <unistd.h>
 
-// #define NODE_COUNT 10
+//# define DEBUG
 
-int NODE_COUNT = 20;
+int NODE_COUNT = 100;
 int MAX_EDGE_VALUE = __INT_MAX__;
 
 /**
@@ -167,7 +167,8 @@ void update_all_nodes(int value, int node_id, int* recvbuff, MPI_Group mygroup, 
             }
         }
         free(fakebuff);
-    } else {
+    }
+    else {
         MPI_Alltoall(sendbuff, 1, MPI_INT, recvbuff, 1, MPI_INT, MPI_COMM_WORLD);
     }
 }
@@ -178,15 +179,12 @@ void update_all_nodes(int value, int node_id, int* recvbuff, MPI_Group mygroup, 
  */
 void update_min_graph(int* min_values, int** min_graph) {
     int i = 0;
-    for (i; i < NODE_COUNT; i++)
-    {
+    for (i; i < NODE_COUNT; i++) {
         int act = min_values[i];
-        if (act == -1)
-        {
-            printf("something wrong\n");
+        if (act == -1) {
+            //do nothing
         }
-        else
-        {
+        else {
             // Setting to true means that that edge is included
             min_graph[i][act] = 1;
             min_graph[act][i] = 1;
@@ -194,6 +192,9 @@ void update_min_graph(int* min_values, int** min_graph) {
     }
 }
 
+/**
+ * Not needed
+ */
 void add_recursive_references(int** min_graph) {
     int i = 0;
     for (i; i < NODE_COUNT; i++)
@@ -201,9 +202,8 @@ void add_recursive_references(int** min_graph) {
         int j = 0;
         for (j; j < NODE_COUNT; j++)
         {
-            if (min_graph[i][j] == 1 || min_graph[j][i] == 1)
-            {
-                if (min_graph[i][j]==0 || min_graph[j][i] == 0) {
+            if (min_graph[i][j] == 1 || min_graph[j][i] == 1) {
+                if (min_graph[i][j] == 0 || min_graph[j][i] == 0) {
                     printf("not symmetric\n");
                 }
                 min_graph[j][i] = 1;
@@ -248,6 +248,7 @@ void prune_graph(bool* nodes_in_component, int** graph) {
                 if (nodes_in_component[j])
                 {
                     graph[i][j] = -1;
+                    graph[j][i] = -1;
                 }
             }
         }
@@ -286,44 +287,34 @@ void update_mpi_group(bool* component_nodes, MPI_Group* new_group, int* group_si
 
     int i = 0;
     int c = 0;
-    for (i; i < NODE_COUNT; i++)
-    {
+    for (i; i < NODE_COUNT; i++) {
         if (component_nodes[i])
         {
             ranks[c++] = i;
         }
     }
-    
-    //printf("Rank: ");
+
     int ranks_ok[c];
     i = 0;
-    for (i; i < c; i++)
-    {
-    //    printf("%d,", ranks[i]);
+    for (i; i < c; i++) {
         ranks_ok[i] = ranks[i];
     }
-    //printf("\n");
-
-    /*
-    i = 0;
-    for (i; i < NODE_COUNT; i++)
-    {
-        printf("%d,", component_nodes[i]);
-    }
-    printf("\n\n");
-    */
 
     *group_size = c;
 
     MPI_Group group;
     MPI_Comm_group(MPI_COMM_WORLD, &group);
+#ifdef DEBUG
     int size = 0;
     MPI_Group_size(group, &size);
     printf("group world size: %d; new size: %d; \n", size, c);
+#endif
     MPI_Group_incl(group, c, ranks_ok, new_group);
 }
 
 int main(int argc, char** argv) {
+    int** graph = fill_graph(); // generate graph before forking
+
     MPI_Init(NULL, NULL);
     MPI_Comm_size(MPI_COMM_WORLD, &NODE_COUNT);
     int world_rank;
@@ -331,7 +322,6 @@ int main(int argc, char** argv) {
 
     //log_message(world_rank, "Started");
 
-    int** graph = fill_graph();
     int** min_graph = allocate_and_init_matrix();
 
     MPI_Group mygroup;
@@ -368,12 +358,39 @@ int main(int argc, char** argv) {
             //printf("min_graph_value: %d\n", min_graph[min_id][min_dest]);
             min_graph[min_id][min_dest] = 1;
             min_graph[min_dest][min_id] = 1;
+
+            int l = 0;
+            for (l; l < NODE_COUNT; l++)
+            {
+                recv_values[l] = -1;
+            }
+
+            if (min_id != world_rank) {
+                // if this node is not the one that will connect two components, set edge to not connected
+                lightest = -1;
+            }
+            else {
+#ifdef DEBUG
+                printf("min_id: %d; dest: %d; weight: %d\n", min_id, min_dest, graph[min_id][min_dest]);
+                printf("im the min\n");
+#endif
+            }
         }
-        else
-        {
-            update_all_nodes(lightest, world_rank, recv_values, NULL, NODE_COUNT, NULL);
-            update_min_graph(recv_values, min_graph);
+
+        update_all_nodes(lightest, world_rank, recv_values, NULL, NODE_COUNT, NULL);
+
+#ifdef DEBUG
+        i = 0;
+        int cc = 0;
+        for (i; i < NODE_COUNT; i++) {
+            if (recv_values[i] != -1)
+                cc++;
         }
+        if (cc != 1)
+            printf("[ID:%d][cycl:%d] has %d new connections\n", world_rank, count, cc);
+#endif
+
+        update_min_graph(recv_values, min_graph);
 
         free(recv_values);
 
@@ -387,6 +404,7 @@ int main(int argc, char** argv) {
         }
         find_component(component_nodes, world_rank, min_graph, visited);
 
+#ifdef DEBUG
         if (world_rank == 0)
         {
             int i = 0;
@@ -399,15 +417,29 @@ int main(int argc, char** argv) {
             printf("\n");
             //print_matrix(graph);
         }
-
-        //add_recursive_references(min_graph);
+        i = 0;
+        int c = 0;
+        for (i; i < NODE_COUNT; i++) {
+            if (component_nodes[i])
+                c++;
+        }
+        printf("[ID:%d][cycl:%d] Component#: %d;\tcomponents:", world_rank, count, c);
+        i = 0;
+        for (i; i < NODE_COUNT; i++) {
+            printf("%d,", component_nodes[i]);
+        }
+        printf("\n");
+#endif
 
         // check if there is a single component (algorithm has finished)
         if (is_connected(component_nodes))
         {
-            if (1 == 1)
+            if (world_rank == 0)
             {
+#ifdef DEBUG
                 printf("%d is connected\n", world_rank);
+#endif
+                print_matrix(min_graph);
             }
             break;
         }
@@ -415,13 +447,6 @@ int main(int argc, char** argv) {
         // prune the graph by removing edges between nodes of the same component (needed for finding lightest edge)
         prune_graph(component_nodes, graph);
         update_mpi_group(component_nodes, &mygroup, &group_size);
-
-        printf("[ID:%d][cycl:%d] Component#: %d;\tcomponents:", world_rank, count, group_size);
-        i = 0;
-        for (i; i<NODE_COUNT; i++) {
-            printf("%d,", component_nodes[i]);
-        }
-        printf("\n");
 
         count++;
     }
