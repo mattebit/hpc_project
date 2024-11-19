@@ -4,6 +4,7 @@
 #include <time.h>
 #include <stdint.h>
 #include <string.h>
+#include <omp.h>
 
 // Improved random number generation
 typedef struct {
@@ -109,29 +110,65 @@ void generate_large_graph(GraphConfig config) {
     xorshift64_state rng = {.state = time(NULL)};
 
     // Write header
-    fprintf(file, "%lld %lld\n", (long long)config.vertex_count, (long long)target_edge_count);
+    fprintf(file, "%lld %lld\n", (long long)config.vertex_count, (long long)(target_edge_count * 2));
 
-    // Generate edges
+    // Generate edges in parallel
     int64_t edge_count = 0;
-    while (edge_count < target_edge_count) {
-        // Ensure different source and destination
-        int64_t src = random_range(&rng, 0, config.vertex_count - 2);
-        int64_t dest = random_range(&rng, src + 1, config.vertex_count - 1);
+    #pragma omp parallel
+    {
+        // Each thread has its own random number generator state
+        xorshift64_state local_rng = rng;
+        local_rng.state += omp_get_thread_num();
 
-        // Check if edge already exists
-        if (!edge_exists(edge_bitmap, src, dest)) {
-            int weight = random_range(&rng, config.min_weight, config.max_weight);
+        // Temporary buffer for each thread
+        char* buffer = malloc(1024 * 1024);  // 1 MB buffer
+        int buffer_pos = 0;
 
-            // Write edge in both directions for undirected graph
-            fprintf(file, "%lld %lld %d\n", (long long)src, (long long)dest, weight);
-            fprintf(file, "%lld %lld %d\n", (long long)dest, (long long)src, weight);
+        #pragma omp for reduction(+:edge_count)
+        for (int64_t i = 0; i < target_edge_count; i++) {
+            while (true) {
+                // Ensure different source and destination
+                int64_t src = random_range(&local_rng, 0, config.vertex_count - 2);
+                int64_t dest = random_range(&local_rng, src + 1, config.vertex_count - 1);
 
-            // Mark edges to prevent duplicates
-            mark_edge(edge_bitmap, src, dest);
-            mark_edge(edge_bitmap, dest, src);
+                // Check if edge already exists
+                if (!edge_exists(edge_bitmap, src, dest)) {
+                    int weight = random_range(&local_rng, config.min_weight, config.max_weight);
 
-            edge_count++;
+                    // Write edge in both directions for undirected graph
+                    buffer_pos += snprintf(buffer + buffer_pos, 1024 * 1024 - buffer_pos,
+                                           "%lld %lld %d\n", (long long)src, (long long)dest, weight);
+                    buffer_pos += snprintf(buffer + buffer_pos, 1024 * 1024 - buffer_pos,
+                                           "%lld %lld %d\n", (long long)dest, (long long)src, weight);
+
+                    // Mark edges to prevent duplicates
+                    mark_edge(edge_bitmap, src, dest);
+                    mark_edge(edge_bitmap, dest, src);
+
+                    edge_count++;
+                    break;
+                }
+            }
+
+            // Flush buffer if full
+            if (buffer_pos > 1024 * 1024 - 100) {
+                #pragma omp critical
+                {
+                    fwrite(buffer, 1, buffer_pos, file);
+                }
+                buffer_pos = 0;
+            }
         }
+
+        // Flush remaining buffer
+        if (buffer_pos > 0) {
+            #pragma omp critical
+            {
+                fwrite(buffer, 1, buffer_pos, file);
+            }
+        }
+
+        free(buffer);
     }
 
     // Clean up
@@ -140,7 +177,7 @@ void generate_large_graph(GraphConfig config) {
 
     printf("Graph Generation Complete:\n");
     printf("- Vertices: %lld\n", (long long)config.vertex_count);
-    printf("- Target Edges: %lld\n", (long long)target_edge_count);
+    printf("- Target Edges: %lld\n", (long long)(target_edge_count * 2));
     printf("- File: %s\n", config.filename);
 }
 
