@@ -120,6 +120,8 @@ void boruvkaMST(int V, int E, Edge edges[], int rank, int size) {
             }
         }
 
+        //
+
         // Find the local minimum edge
         for (int v = 0; v < V; ++v) {
             if (cheapest[v] != -1 && edges[cheapest[v]].weight < localMinEdgeWeight) {
