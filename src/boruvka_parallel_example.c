@@ -40,6 +40,8 @@ void Union(int src, int dest, Subset subsets[]) {
 
 // Function to read graph from file
 void readGraphFromFile(const char *filename, int* V, int* E, Edge** edges) {
+    printf("Reading graph from file...\n");
+    
     FILE* file = fopen(filename, "r");
     if (!file) {
         perror("Error opening file");
@@ -70,7 +72,7 @@ void readGraphFromFile(const char *filename, int* V, int* E, Edge** edges) {
             MPI_Abort(MPI_COMM_WORLD, 1);
         }
     }
-
+    printf("Finished reading\n");
     fclose(file);
 }
 
@@ -99,6 +101,10 @@ void boruvkaMST(int V, int E, Edge edges[], int rank, int size) {
         }
 
         // Each process works on its chunk of edges
+        // Find the local minimum edge
+        int localMinEdgeIndex = -1;
+        int localMinEdgeWeight = INT_MAX;
+
         for (int i = start; i < end; i++) {
             int set1 = find(subsets, edges[i].src);
             int set2 = find(subsets, edges[i].dest);
@@ -114,40 +120,41 @@ void boruvkaMST(int V, int E, Edge edges[], int rank, int size) {
             }
         }
 
-        // Share cheapest edges across all processes
-        int* allCheapest = (int*)malloc(V * sizeof(int));
-        MPI_Allreduce(cheapest, allCheapest, V, MPI_INT, MPI_MIN, MPI_COMM_WORLD);
+        // Find the local minimum edge
+        for (int v = 0; v < V; ++v) {
+            if (cheapest[v] != -1 && edges[cheapest[v]].weight < localMinEdgeWeight) {
+                localMinEdgeWeight = edges[cheapest[v]].weight;
+                localMinEdgeIndex = cheapest[v];
+            }
+        }
+
+        // Gather all local minimum edges at process 0
+        struct {
+            int weight;
+            int index;
+        } localMinEdge = {localMinEdgeWeight, localMinEdgeIndex}, globalMinEdge;
+
+        MPI_Reduce(&localMinEdge, &globalMinEdge, 1, MPI_2INT, MPI_MINLOC, 0, MPI_COMM_WORLD);
 
         bool anyMerge = false;
 
         // Only rank 0 performs merging and weight calculation
         if (rank == 0) {
-            printf("\nSTART OF CYCLE\n");
-            for (int i = 0; i < V; i++) {
-                if (allCheapest[i] == -1)
-                    continue;
-
-                int set1 = find(subsets, edges[allCheapest[i]].src);
-                int set2 = find(subsets, edges[allCheapest[i]].dest);
-
-                // Ensure the indices are valid
-                if (allCheapest[i] < 0 || allCheapest[i] >= E) {
-                    fprintf(stderr, "Invalid edge index: %d\n", allCheapest[i]);
-                    MPI_Abort(MPI_COMM_WORLD, 1);
-                }
+            if (globalMinEdge.index != -1) {
+                int set1 = find(subsets, edges[globalMinEdge.index].src);
+                int set2 = find(subsets, edges[globalMinEdge.index].dest);
 
                 if (set1 != set2) {
                     printf("adding src: %d dest: %d weight: %d\n", 
-                        edges[allCheapest[i]].src, 
-                        edges[allCheapest[i]].dest,
-                        edges[allCheapest[i]].weight);
-                    localMSTWeight += edges[allCheapest[i]].weight;
+                        edges[globalMinEdge.index].src, 
+                        edges[globalMinEdge.index].dest,
+                        edges[globalMinEdge.index].weight);
+                    localMSTWeight += edges[globalMinEdge.index].weight;
                     Union(set1, set2, subsets);
                     numTrees--;
                     anyMerge = true;
                 }
             }
-            printf("\nEND OF CYCLE\n");
         }
 
         // Synchronize all processes before proceeding
@@ -157,8 +164,6 @@ void boruvkaMST(int V, int E, Edge edges[], int rank, int size) {
         MPI_Bcast(subsets, V * sizeof(Subset), MPI_BYTE, 0, MPI_COMM_WORLD);
         MPI_Bcast(&numTrees, 1, MPI_INT, 0, MPI_COMM_WORLD);
         MPI_Bcast(&anyMerge, 1, MPI_C_BOOL, 0, MPI_COMM_WORLD);
-
-        free(allCheapest);
 
         if (!anyMerge) break;
     }
@@ -209,8 +214,21 @@ int main(int argc, char** argv) {
         edges = (Edge*)malloc(E * sizeof(Edge));
     }
 
-    // Broadcast edges to all processes
-    MPI_Bcast(edges, E * sizeof(Edge), MPI_BYTE, 0, MPI_COMM_WORLD);
+    // Define the MPI data type for the Edge structure
+    MPI_Datatype MPI_Edge;
+    int lengths[3] = {1, 1, 1};
+    const MPI_Aint displacements[3] = {offsetof(Edge, src), offsetof(Edge, dest), offsetof(Edge, weight)};
+    MPI_Datatype types[3] = {MPI_INT, MPI_INT, MPI_INT};
+    MPI_Type_create_struct(3, lengths, displacements, types, &MPI_Edge);
+
+    // Resize the data type to remove padding
+    MPI_Aint lb, extent;
+    MPI_Type_get_extent(MPI_Edge, &lb, &extent);
+    MPI_Type_create_resized(MPI_Edge, lb, sizeof(Edge), &MPI_Edge);
+    MPI_Type_commit(&MPI_Edge);
+
+    // Broadcast edges to all processes using the custom MPI data type
+    MPI_Bcast(edges, E, MPI_Edge, 0, MPI_COMM_WORLD);
 
     boruvkaMST(V, E, edges, rank, size);
 
@@ -220,6 +238,7 @@ int main(int argc, char** argv) {
     }
 
     free(edges);
+    MPI_Type_free(&MPI_Edge);
     MPI_Finalize();
     return 0;
 }
