@@ -23,6 +23,8 @@ def parse_matrix():
     rows = adj_matrix_str.split("\n")
 
     for r in rows:
+        if len(r) == 0:
+            continue
         elements = r.split(" ")
         res_r = []
         for e in elements:
