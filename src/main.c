@@ -6,7 +6,7 @@
 
 //# define DEBUG
 
-int NODE_COUNT = 800;
+int NODE_COUNT = 6000;
 int MAX_EDGE_VALUE = __INT_MAX__;
 
 int MY_NODES_FROM = 0;
@@ -49,7 +49,7 @@ int** fill_graph() {
     srand(127);
     int** matrix = allocate_and_init_matrix();
 
-    int used_values[NODE_COUNT * NODE_COUNT * 4];
+    int* used_values = malloc( NODE_COUNT * NODE_COUNT * 4 * sizeof(int));
     int k = 0;
     for (k; k < NODE_COUNT * 2; k++)
     {
@@ -89,6 +89,7 @@ int** fill_graph() {
             }
         }
     }
+    free(used_values);
 
     return matrix;
 }
@@ -132,50 +133,6 @@ int find_min_indx(int* nodes_id, int** graph) {
 }
 
 /**
- * Send current node value to all node, and receive values from all the other nodes.
- * This function returns an array containing the results of the nodes, having the result of
- * node i in index i
- */
-void update_all_nodes(int value, int node_id, int* recvbuff, MPI_Group mygroup, int size, int* group_members) {
-    int sendbuff[size];
-    // the send buff contains in every index, the data to be sent to the process with that index
-    // i.e. sendbuff[2] will be sent to process 2
-
-    // Set the value to be sent to all the nodes
-    int i = 0;
-    for (i; i < size; i++) {
-        sendbuff[i] = value;
-    }
-
-    // recvbuff will contain in every index the value that has been received by the process with that index
-
-    if (mygroup != NULL) {
-        MPI_Comm new_comm;
-        MPI_Comm_create(MPI_COMM_WORLD, mygroup, &new_comm);
-
-        int* fakebuff = malloc(sizeof(int) * size);
-
-        // printf("Nodeid: %d my values: %d,%d,%d,%d\n", node_id, sendbuff[0], sendbuff[1], sendbuff[2], sendbuff[3]);
-        MPI_Alltoall(sendbuff, 1, MPI_INT, fakebuff, 1, MPI_INT, new_comm);
-        //printf("Nodeid: %d received values:", node_id);
-
-        int i = 0;
-        int c = 0;
-        for (i; i < NODE_COUNT; i++)
-        {
-            if (group_members[i])
-            {
-                recvbuff[i] = fakebuff[c++];
-            }
-        }
-        free(fakebuff);
-    }
-    else {
-        MPI_Alltoall(sendbuff, 1, MPI_INT, recvbuff, 1, MPI_INT, MPI_COMM_WORLD);
-    }
-}
-
-/**
  * Update the min graph with the min values received by the nodes.
  * The min_values array should be of length NODE_COUNT, and contain one value for each index
  */
@@ -190,27 +147,6 @@ void update_min_graph(int* min_values, int** min_graph) {
             // Setting to 1 means that that edge is included
             min_graph[i][act] = 1;
             min_graph[act][i] = 1;
-        }
-    }
-}
-
-/**
- * Not needed
- */
-void add_recursive_references(int** min_graph) {
-    int i = 0;
-    for (i; i < NODE_COUNT; i++)
-    {
-        int j = 0;
-        for (j; j < NODE_COUNT; j++)
-        {
-            if (min_graph[i][j] == 1 || min_graph[j][i] == 1) {
-                if (min_graph[i][j] == 0 || min_graph[j][i] == 0) {
-                    printf("not symmetric\n");
-                }
-                min_graph[j][i] = 1;
-                min_graph[i][j] = 1;
-            }
         }
     }
 }
@@ -284,36 +220,6 @@ void print_matrix(int** matrix) {
     }
 }
 
-void update_mpi_group(int* component_nodes, MPI_Group* new_group, int* group_size) {
-    int ranks[NODE_COUNT];
-
-    int i = 0;
-    int c = 0;
-    for (i; i < NODE_COUNT; i++) {
-        if (component_nodes[i])
-        {
-            ranks[c++] = i;
-        }
-    }
-
-    int ranks_ok[c];
-    i = 0;
-    for (i; i < c; i++) {
-        ranks_ok[i] = ranks[i];
-    }
-
-    *group_size = c;
-
-    MPI_Group group;
-    MPI_Comm_group(MPI_COMM_WORLD, &group);
-#ifdef DEBUG
-    int size = 0;
-    MPI_Group_size(group, &size);
-    printf("group world size: %d; new size: %d; \n", size, c);
-#endif
-    MPI_Group_incl(group, c, ranks_ok, new_group);
-}
-
 void zero_array(int* array, int size) {
     int i = 0;
     for (i; i < size; i++) {
@@ -348,7 +254,7 @@ int find_min_in_array(int* arr, int size) {
 }
 
 int find_num_components(int* roots) {
-    int buff[NODE_COUNT];
+    int* buff = malloc(NODE_COUNT * sizeof(int));
     zero_array(buff, NODE_COUNT);
     int i = 0;
     for (i; i< NODE_COUNT; i++) {
@@ -362,6 +268,7 @@ int find_num_components(int* roots) {
             c += 1;
         }
     }
+    free(buff);
     return c;
 }
 
@@ -387,14 +294,14 @@ int main(int argc, char** argv) {
     MPI_Group mygroup;
     int group_size = 0;
 
-    int roots[NODE_COUNT];
+    int* roots = malloc(NODE_COUNT * sizeof(int));
     zero_array(roots, NODE_COUNT);
 
     int count = 0;
     while (1)
     {
         if (count == 0) {
-            int ligthest_edges[vertex_per_process];
+            int* ligthest_edges = malloc(vertex_per_process * sizeof(int));
             zero_array(ligthest_edges, vertex_per_process);
             int i = MY_NODES_FROM;
             for (i; i < MY_NODES_TO; i++) {
@@ -414,8 +321,9 @@ int main(int argc, char** argv) {
                     MPI_INT,
                     MPI_COMM_WORLD
             );
-
+            free(ligthest_edges);
             update_min_graph(recv_values, min_graph);
+            free(recv_values);
         } else {
             int i = MY_NODES_FROM;
             int min = MAX_EDGE_VALUE;
@@ -432,7 +340,7 @@ int main(int argc, char** argv) {
             }
             int send_buff[2] = {min_id_from, min_id_to};
 
-            int recv_buff[process_count*2];
+            int* recv_buff =malloc(process_count * 2 * sizeof(int));
             minus_array(recv_buff, process_count*2);
 
             MPI_Allgather(
@@ -445,7 +353,7 @@ int main(int argc, char** argv) {
                     MPI_COMM_WORLD
             );
 
-            int min_indexes[NODE_COUNT];
+            int* min_indexes = malloc(NODE_COUNT * sizeof(int));
             minus_array(min_indexes, NODE_COUNT);
 
             int j = 0;
@@ -458,11 +366,14 @@ int main(int argc, char** argv) {
             int overall_min_id = find_min_indx(min_indexes, graph);
             min_graph[overall_min_id][min_indexes[overall_min_id]] = 1;
             min_graph[min_indexes[overall_min_id]][overall_min_id] = 1;
+
+            free(min_indexes);
+            free(recv_buff);
         }
 
         // this array tells which nodes are part of the component of this node
         // find nodes that are part of this node component
-        int visited[NODE_COUNT];
+        int* visited = malloc(NODE_COUNT * sizeof(int));
         zero_array(visited, NODE_COUNT);
 
         // compute roots of each node
@@ -470,6 +381,8 @@ int main(int argc, char** argv) {
         for (i; i < NODE_COUNT; i++) {
             find_root(i, min_graph, visited, i, roots);
         }
+
+        free(visited);
 
         if (find_num_components(roots) == 1) {
             if ( world_rank == 0 ) {
