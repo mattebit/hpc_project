@@ -337,7 +337,7 @@ void update_min_graph_from_roots(int* roots, int** graph, int** min_graph, int* 
 
 
 int main(int argc, char** argv) {
-    last_time = MPI_Wtime();
+    
 
     int** graph = fill_graph(); // generate graph before forking
 
@@ -347,7 +347,7 @@ int main(int argc, char** argv) {
     int world_rank;
     MPI_Comm_rank(MPI_COMM_WORLD, &world_rank);
 
-    time_print("generated graph", world_rank);
+    // time_print("generated graph", world_rank);
 
     // Find indexes of which vertex this node is responsible for
     int vertex_per_process = NODE_COUNT / process_count; // TODO: fix funziona solo con pari
@@ -359,10 +359,12 @@ int main(int argc, char** argv) {
 
     int** min_graph = allocate_and_init_matrix();
 
-    time_print("Allocated min matrix", world_rank);
+    // time_print("Allocated min matrix", world_rank);
 
     int* roots = malloc(NODE_COUNT * sizeof(int));
     zero_array(roots, NODE_COUNT);
+
+    last_time = MPI_Wtime();
 
     int count = 0;
     while (1)
@@ -379,7 +381,7 @@ int main(int argc, char** argv) {
             int* recv_values = malloc(NODE_COUNT * sizeof(int));
             minus_array(recv_values, NODE_COUNT);
 
-            time_print("end min compute", world_rank);
+            // time_print("end min compute", world_rank);
 
             MPI_Allgather(
                     ligthest_edges,
@@ -390,13 +392,13 @@ int main(int argc, char** argv) {
                     MPI_INT,
                     MPI_COMM_WORLD
             );
-            time_print("end all gather", world_rank);
+            // time_print("end all gather", world_rank);
 
             free(ligthest_edges);
             update_min_graph(recv_values, min_graph);
             free(recv_values);
 
-            time_print("update min graph", world_rank);
+            // time_print("update min graph", world_rank);
         } else {
             int* result = malloc(vertex_per_process * sizeof(int));
             minus_array(result, vertex_per_process);
@@ -478,7 +480,7 @@ int main(int argc, char** argv) {
         int* visited = malloc(NODE_COUNT * sizeof(int));
         zero_array(visited, NODE_COUNT);
 
-        time_print("zeroed array", world_rank);
+        // time_print("zeroed array", world_rank);
 
         // compute roots of each node
         int i = 0;
@@ -486,7 +488,7 @@ int main(int argc, char** argv) {
             find_root(i, min_graph, visited, i, roots);
         }
 
-        time_print("calculate components", world_rank);
+        // time_print("calculate components", world_rank);
         free(visited);
 
         if (find_num_components(roots) == 1) {
@@ -497,10 +499,10 @@ int main(int argc, char** argv) {
         }
 
         prune_graph(roots, graph);
-        time_print("pruned graph", world_rank);
+        // time_print("pruned graph", world_rank);
         count++;
     }
-
+    time_print("end_calculation", world_rank);
     // Finalize the MPI environment. No more MPI calls can be made after this
     MPI_Finalize();
 }
