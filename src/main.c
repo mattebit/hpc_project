@@ -6,11 +6,13 @@
 
 //# define DEBUG
 
-int NODE_COUNT = 6000;
+int NODE_COUNT = 15000;
 int MAX_EDGE_VALUE = __INT_MAX__;
 
 int MY_NODES_FROM = 0;
 int MY_NODES_TO = 100;
+
+double last_time = 0.0;
 
 #define NULL ((void *)0)
 
@@ -272,7 +274,71 @@ int find_num_components(int* roots) {
     return c;
 }
 
+void time_print(char* desc, int world_rank) {
+    if (world_rank != 0)
+        return;
+    double actual_time = MPI_Wtime();
+    double diff = actual_time - last_time;
+    printf("[ID:%d] Time diff: %f sec (%s) -> \n", world_rank, diff, desc);
+    last_time = actual_time;
+}
+
+void find_min_components(int*roots, int** graph, int* result) {
+    int i = MY_NODES_FROM;
+    for (i; i< MY_NODES_TO; i++) {
+        int act_root = roots[i];
+
+        int min = MAX_EDGE_VALUE;
+        int min_id = -1;
+        int j = 0;
+        for (j; j < NODE_COUNT; j++) {
+            if (graph[i][j] != -1 && graph[i][j] < min) {
+                min = graph[i][j];
+                min_id = j;
+            }
+        }
+        result[i - MY_NODES_FROM] = min_id;
+    }
+}
+
+void update_min_graph_from_roots(int* roots, int** graph, int** min_graph, int* result) {
+    int* unique_roots = malloc(NODE_COUNT * sizeof(int));
+    minus_array(unique_roots, NODE_COUNT);
+
+    int i = 0;
+    for (i; i< NODE_COUNT; i++) {
+        unique_roots[roots[i]] += 1;
+    }
+
+    //print_array(unique_roots, "unique_roots", NODE_COUNT);
+
+    i = 0;
+    for (i; i < NODE_COUNT; i++) {
+        if (unique_roots[i] != -1) {
+            int j = 0;
+            int min_id_from = -1;
+            int min_id_to = -1;
+            int min = MAX_EDGE_VALUE;
+            for (j; j < NODE_COUNT; j++) {
+                // fin the min inside the values of that root
+                if (roots[j] == i) {
+                    if (graph[j][result[j]] < min) {
+                        min = graph[j][result[j]];
+                        min_id_from = j;
+                        min_id_to = result[j];
+                    }
+                }
+            }
+            min_graph[min_id_from][min_id_to] = 1;
+            min_graph[min_id_to][min_id_from] = 1;
+        }
+    }
+}
+
+
 int main(int argc, char** argv) {
+    last_time = MPI_Wtime();
+
     int** graph = fill_graph(); // generate graph before forking
 
     MPI_Init(NULL, NULL);
@@ -280,6 +346,8 @@ int main(int argc, char** argv) {
     MPI_Comm_size(MPI_COMM_WORLD, &process_count);
     int world_rank;
     MPI_Comm_rank(MPI_COMM_WORLD, &world_rank);
+
+    time_print("generated graph", world_rank);
 
     // Find indexes of which vertex this node is responsible for
     int vertex_per_process = NODE_COUNT / process_count; // TODO: fix funziona solo con pari
@@ -291,8 +359,7 @@ int main(int argc, char** argv) {
 
     int** min_graph = allocate_and_init_matrix();
 
-    MPI_Group mygroup;
-    int group_size = 0;
+    time_print("Allocated min matrix", world_rank);
 
     int* roots = malloc(NODE_COUNT * sizeof(int));
     zero_array(roots, NODE_COUNT);
@@ -312,6 +379,8 @@ int main(int argc, char** argv) {
             int* recv_values = malloc(NODE_COUNT * sizeof(int));
             minus_array(recv_values, NODE_COUNT);
 
+            time_print("end min compute", world_rank);
+
             MPI_Allgather(
                     ligthest_edges,
                     vertex_per_process,
@@ -321,10 +390,41 @@ int main(int argc, char** argv) {
                     MPI_INT,
                     MPI_COMM_WORLD
             );
+            time_print("end all gather", world_rank);
+
             free(ligthest_edges);
             update_min_graph(recv_values, min_graph);
             free(recv_values);
+
+            time_print("update min graph", world_rank);
         } else {
+            int* result = malloc(vertex_per_process * sizeof(int));
+            minus_array(result, vertex_per_process);
+
+            find_min_components(roots, graph, result);
+
+            //print_array(result, "send", vertex_per_process);
+            //print_array(roots, "roots", NODE_COUNT);
+
+            int* recv_buff = malloc(NODE_COUNT * sizeof(int));
+            //minus_array(recv_buff, NODE_COUNT);
+
+            MPI_Allgather(
+                    result,
+                    vertex_per_process,
+                    MPI_INT,
+                    recv_buff,
+                    vertex_per_process,
+                    MPI_INT,
+                    MPI_COMM_WORLD
+            );
+
+            //print_array(recv_buff, "recv", NODE_COUNT);
+
+            // TODO: calculate min between all arrays
+            update_min_graph_from_roots(roots, graph, min_graph, recv_buff);
+
+            /*
             int i = MY_NODES_FROM;
             int min = MAX_EDGE_VALUE;
             int min_id_from = -1;
@@ -369,6 +469,8 @@ int main(int argc, char** argv) {
 
             free(min_indexes);
             free(recv_buff);
+
+             */
         }
 
         // this array tells which nodes are part of the component of this node
@@ -376,12 +478,15 @@ int main(int argc, char** argv) {
         int* visited = malloc(NODE_COUNT * sizeof(int));
         zero_array(visited, NODE_COUNT);
 
+        time_print("zeroed array", world_rank);
+
         // compute roots of each node
         int i = 0;
         for (i; i < NODE_COUNT; i++) {
             find_root(i, min_graph, visited, i, roots);
         }
 
+        time_print("calculate components", world_rank);
         free(visited);
 
         if (find_num_components(roots) == 1) {
@@ -392,6 +497,7 @@ int main(int argc, char** argv) {
         }
 
         prune_graph(roots, graph);
+        time_print("pruned graph", world_rank);
         count++;
     }
 
