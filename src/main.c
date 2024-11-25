@@ -3,6 +3,7 @@
 #include <stdlib.h>
 #include <time.h>
 #include <unistd.h>
+#include <string.h>
 
 //# define DEBUG
 
@@ -32,17 +33,7 @@ int** allocate_and_init_matrix() {
     int** min_graph = (int**)malloc(NODE_COUNT * sizeof(int*));
     for (int i = 0; i < NODE_COUNT; i++)
     {
-        min_graph[i] = (int*)malloc(NODE_COUNT * sizeof(int));
-    }
-
-    int i = 0;
-    for (i; i < NODE_COUNT; i++)
-    {
-        int j = 0;
-        for (j; j < NODE_COUNT; j++)
-        {
-            min_graph[i][j] = 0;
-        }
+        min_graph[i] = (int*)calloc(NODE_COUNT, sizeof(int));
     }
     return min_graph;
 }
@@ -51,43 +42,20 @@ int** fill_graph() {
     srand(127);
     int** matrix = allocate_and_init_matrix();
 
-    int* used_values = malloc( NODE_COUNT * NODE_COUNT * 4 * sizeof(int));
-    int k = 0;
-    for (k; k < NODE_COUNT * 2; k++)
-    {
-        used_values[k] = 0;
-    }
+    int* used_values = (int*)calloc( NODE_COUNT * NODE_COUNT * 4, sizeof(int));
 
-    int i = 0;
-    for (i; i < NODE_COUNT; i++)
-    {
-        int j = 0;
-        for (j; j < NODE_COUNT; j++)
-        {
-            if (i == j)
-            {
+    for (int i = 0; i < NODE_COUNT; i++) {
+        for (int j = 0; j < NODE_COUNT; j++) {
+            if (i == j) {
                 matrix[i][j] = -1;
-            }
-            else
-            {
-                int gen = 0;
-                while (1)
-                {
+            } else {
+                int gen;
+                do {
                     gen = rand() % (NODE_COUNT * NODE_COUNT * 4);
-                    if (!used_values[gen])
-                    {
-                        used_values[gen] = 1;
-                        break;
-                    }
-                }
-                if (matrix[i][j] == 0)
-                {
-                    matrix[i][j] = gen;
-                }
-                if (matrix[j][i] == 0)
-                {
-                    matrix[j][i] = gen;
-                }
+                } while (used_values[gen]);
+                used_values[gen] = 1;
+                matrix[i][j] = gen;
+                matrix[j][i] = gen;
             }
         }
     }
@@ -361,7 +329,7 @@ int main(int argc, char** argv) {
 
     // time_print("Allocated min matrix", world_rank);
 
-    int* roots = malloc(NODE_COUNT * sizeof(int));
+    int* roots = (int*)malloc(NODE_COUNT * sizeof(int));
     zero_array(roots, NODE_COUNT);
 
     last_time = MPI_Wtime();
@@ -370,7 +338,7 @@ int main(int argc, char** argv) {
     while (1)
     {
         if (count == 0) {
-            int* ligthest_edges = malloc(vertex_per_process * sizeof(int));
+            int* ligthest_edges = (int*)malloc(vertex_per_process * sizeof(int));
             zero_array(ligthest_edges, vertex_per_process);
             int i = MY_NODES_FROM;
             for (i; i < MY_NODES_TO; i++) {
@@ -492,9 +460,9 @@ int main(int argc, char** argv) {
         free(visited);
 
         if (find_num_components(roots) == 1) {
-            if ( world_rank == 0 ) {
-                print_matrix(min_graph);
-            }
+            // if ( world_rank == 0 ) {
+            //     print_matrix(min_graph);
+            // }
             break;
         }
 
@@ -502,7 +470,7 @@ int main(int argc, char** argv) {
         // time_print("pruned graph", world_rank);
         count++;
     }
-    time_print("end_calculation", world_rank);
+    time_print("Finished computing MST", world_rank);
     // Finalize the MPI environment. No more MPI calls can be made after this
     MPI_Finalize();
 }
