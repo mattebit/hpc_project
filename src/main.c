@@ -82,26 +82,6 @@ int find_lightest_edge(int** graph, int node_id) {
     return min_id;
 }
 
-int find_min_indx(int* nodes_id, int** graph) {
-    int i = 0;
-    int min = MAX_EDGE_VALUE;
-    int min_id = -1;
-    for (i; i < NODE_COUNT; i++)
-    {
-        if (nodes_id[i] != -1)
-        {
-            int act = graph[i][nodes_id[i]];
-            if (act != -1 && act < min)
-            {
-                min = act;
-                min_id = i;
-            }
-        }
-    }
-
-    return min_id;
-}
-
 /**
  * Update the min graph with the min values received by the nodes.
  * The min_values array should be of length NODE_COUNT, and contain one value for each index
@@ -142,8 +122,6 @@ int find_root(int node_id, int** min_graph, int* visited, int min_reported, int*
     return min_root;
 }
 
-
-
 /**
  * Prunes the given graph from the edges between the same component
  */
@@ -161,21 +139,6 @@ void prune_graph(int* roots, int** graph) {
         }
     }
 
-}
-
-/**
- * Check wheter the algorithm finished
- */
-int is_connected(int* component_nodes) {
-    int i = 0;
-    for (i; i < NODE_COUNT; i++)
-    {
-        if (!component_nodes[i])
-        {
-            return 0;
-        }
-    }
-    return 1;
 }
 
 void print_matrix(int** matrix) {
@@ -278,8 +241,6 @@ void update_min_graph_from_roots(int* roots, int** graph, int** min_graph, int* 
         unique_roots[roots[i]] += 1;
     }
 
-    //print_array(unique_roots, "unique_roots", NODE_COUNT);
-
     i = 0;
     for (i; i < NODE_COUNT; i++) {
         if (unique_roots[i] != -1) {
@@ -305,8 +266,6 @@ void update_min_graph_from_roots(int* roots, int** graph, int** min_graph, int* 
 
 
 int main(int argc, char** argv) {
-    
-
     int** graph = fill_graph(); // generate graph before forking
 
     MPI_Init(NULL, NULL);
@@ -373,9 +332,6 @@ int main(int argc, char** argv) {
 
             find_min_components(roots, graph, result);
 
-            //print_array(result, "send", vertex_per_process);
-            //print_array(roots, "roots", NODE_COUNT);
-
             int* recv_buff = malloc(NODE_COUNT * sizeof(int));
             //minus_array(recv_buff, NODE_COUNT);
 
@@ -389,58 +345,7 @@ int main(int argc, char** argv) {
                     MPI_COMM_WORLD
             );
 
-            //print_array(recv_buff, "recv", NODE_COUNT);
-
-            // TODO: calculate min between all arrays
             update_min_graph_from_roots(roots, graph, min_graph, recv_buff);
-
-            /*
-            int i = MY_NODES_FROM;
-            int min = MAX_EDGE_VALUE;
-            int min_id_from = -1;
-            int min_id_to = -1;
-            for (i; i < MY_NODES_TO; i++) {
-                int min_id = find_lightest_edge(graph, i);
-                int val = graph[i][min_id];
-                if (val < min) {
-                    min = val;
-                    min_id_from = i;
-                    min_id_to = min_id;
-                }
-            }
-            int send_buff[2] = {min_id_from, min_id_to};
-
-            int* recv_buff =malloc(process_count * 2 * sizeof(int));
-            minus_array(recv_buff, process_count*2);
-
-            MPI_Allgather(
-                    send_buff,
-                    2,
-                    MPI_INT,
-                    recv_buff,
-                    2,
-                    MPI_INT,
-                    MPI_COMM_WORLD
-            );
-
-            int* min_indexes = malloc(NODE_COUNT * sizeof(int));
-            minus_array(min_indexes, NODE_COUNT);
-
-            int j = 0;
-            for (j; j<process_count*2; j+=2) {
-                min_id_from = recv_buff[j];
-                min_id_to = recv_buff[j+1];
-                min_indexes[min_id_from] = min_id_to;
-            }
-
-            int overall_min_id = find_min_indx(min_indexes, graph);
-            min_graph[overall_min_id][min_indexes[overall_min_id]] = 1;
-            min_graph[min_indexes[overall_min_id]][overall_min_id] = 1;
-
-            free(min_indexes);
-            free(recv_buff);
-
-             */
         }
 
         // this array tells which nodes are part of the component of this node
@@ -448,26 +353,21 @@ int main(int argc, char** argv) {
         int* visited = malloc(NODE_COUNT * sizeof(int));
         zero_array(visited, NODE_COUNT);
 
-        // time_print("zeroed array", world_rank);
-
         // compute roots of each node
         int i = 0;
         for (i; i < NODE_COUNT; i++) {
             find_root(i, min_graph, visited, i, roots);
         }
-
-        // time_print("calculate components", world_rank);
         free(visited);
 
         if (find_num_components(roots) == 1) {
-            // if ( world_rank == 0 ) {
-            //     print_matrix(min_graph);
-            // }
+            if ( world_rank == 0 ) {
+                //print_matrix(min_graph);
+            }
             break;
         }
 
         prune_graph(roots, graph);
-        // time_print("pruned graph", world_rank);
         count++;
     }
     time_print("Finished computing MST", world_rank);
