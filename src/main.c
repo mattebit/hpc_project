@@ -7,14 +7,16 @@
 #include <omp.h>
 
 //# define DEBUG
+# define LOGGING
 
-int NODE_COUNT = 100;
+int NODE_COUNT = 40000;
 int MAX_EDGE_VALUE = __INT_MAX__;
 
 int MY_NODES_FROM = 0;
 int MY_NODES_TO = 100;
 
 double last_time = 0.0;
+double start_time = 0.0;
 
 #define NULL ((void *)0)
 
@@ -45,7 +47,7 @@ int** fill_graph() {
 
     int* used_values = (int*)calloc( NODE_COUNT * NODE_COUNT * 4, sizeof(int));
 
-    #pragma omp parallel for
+    //#pragma omp parallel for
     for (int i = 0; i < NODE_COUNT; i++) {
         for (int j = 0; j < NODE_COUNT; j++) {
             if (i == j) {
@@ -53,7 +55,7 @@ int** fill_graph() {
             } else {
                 int gen;
                 do {
-                    gen = rand() % (NODE_COUNT * NODE_COUNT * 4);
+                        gen = rand() % (NODE_COUNT * NODE_COUNT * 4);
                 } while (used_values[gen]);
                 used_values[gen] = 1;
                 matrix[i][j] = gen;
@@ -63,6 +65,37 @@ int** fill_graph() {
     }
     free(used_values);
 
+    return matrix;
+}
+
+int** read_graph() {
+    int** matrix = allocate_and_init_matrix();
+
+    FILE* fp = fopen("/home/matteo.bitussi/hpc_project/src/graph.txt", "r");
+
+    char* line = malloc(10000*sizeof(char));
+
+    int col_count = 0;
+    int row_count = 0;
+    int done = 0;
+    while (fgets(line, sizeof(line), fp) != NULL && done == 0) {
+        char* token = strtok(line, " ");
+        while (token != NULL) {
+            //printf("col: %d, row: %d\n", col_count, row_count);
+            matrix[row_count][col_count++] = atoi(token);
+            if (col_count == NODE_COUNT) {
+                col_count = 0;
+                row_count++;
+            }
+            if (row_count == NODE_COUNT) {
+                done=1;
+                break;
+            }
+            token = strtok(NULL, " ");
+        }
+    }
+    free(line);
+    fclose(fp);
     return matrix;
 }
 
@@ -128,8 +161,8 @@ int find_root(int node_id, int** min_graph, int* visited, int min_reported, int*
  * Prunes the given graph from the edges between the same component
  */
 void prune_graph(int* roots, int** graph) {
-    int i = 0;
-    for (i; i < NODE_COUNT; i++)
+    #pragma omp parallel for
+    for (int i = 0; i < NODE_COUNT; i++)
     {
         int j = 0;
         for (j; j < NODE_COUNT; j++)
@@ -208,12 +241,14 @@ int find_num_components(int* roots) {
 }
 
 void time_print(char* desc, int world_rank) {
+#ifdef LOGGING
     if (world_rank != 0)
         return;
     double actual_time = MPI_Wtime();
     double diff = actual_time - last_time;
-    printf("[ID:%d] Time taken: %f sec (%s) -> \n", world_rank, diff, desc);
+    printf("[ID:%d] Time taken: %f sec (%s)\n", world_rank, diff, desc);
     last_time = actual_time;
+#endif
 }
 
 int find_min_components(int*roots, int** graph, int* result) {
@@ -264,18 +299,14 @@ void update_min_graph_from_roots(int* roots, int** graph, int** min_graph, int* 
 }
 
 void update_min_graph_from_roots_not_id(int* root_mins, int**graph, int** min_graph) {
-    int i = 0;
-    for (i; i < NODE_COUNT; i++) {
+    #pragma omp parallel for
+    for (int i=0; i < NODE_COUNT; i++) {
         if (root_mins[i] != -1) {
             int root_min_edge_value = root_mins[i];
-            //printf("%d\n", root_min_edge_value);
-            int j = 0;
-            for (j; j < NODE_COUNT; j++) {
+            for (int j=0; j < NODE_COUNT; j++) {
                 int k = 0;
                 for (k; k < NODE_COUNT; k++) {
                     if (graph[j][k] != -1 && graph[j][k] == root_min_edge_value) {
-                        //printf("root_min_edge_value= %d\n", root_min_edge_value);
-                        printf("Connect %d with %d. Weight = %d\n", j, k, graph[j][k]);
                         min_graph[j][k] = 1;
                         min_graph[k][j] = 1;
                         graph[j][k] = -1;
@@ -289,27 +320,29 @@ void update_min_graph_from_roots_not_id(int* root_mins, int**graph, int** min_gr
 
 int main(int argc, char** argv) {
     int** graph = fill_graph(); // generate graph before forking
+    //int** graph = read_graph();
+    //print_matrix(graph);
 
     MPI_Init(NULL, NULL);
     last_time = MPI_Wtime();
+    start_time = MPI_Wtime();
     int process_count;
     MPI_Comm_size(MPI_COMM_WORLD, &process_count);
     int world_rank;
     MPI_Comm_rank(MPI_COMM_WORLD, &world_rank);
 
-    time_print("generated graph", world_rank);
+    time_print("Start", world_rank);
+
+#ifdef LOGGING
+    if (world_rank == 0) printf("[START] NODE_COUNT:%d,process_count:%d\n", NODE_COUNT, process_count);
+#endif
 
     // Find indexes of which vertex this node is responsible for
     int vertex_per_process = NODE_COUNT / process_count; // TODO: fix funziona solo con pari
     MY_NODES_FROM = world_rank*vertex_per_process;
     MY_NODES_TO = MY_NODES_FROM + vertex_per_process;
 
-    //log_message(world_rank, "Started");
-    //printf("ID: %d, indexes [%d,%d]\n", world_rank, MY_NODES_FROM, MY_NODES_TO);
-
     int** min_graph = allocate_and_init_matrix();
-
-    // time_print("Allocated min matrix", world_rank);
 
     int* roots = (int*)malloc(NODE_COUNT * sizeof(int));
     zero_array(roots, NODE_COUNT);
@@ -351,8 +384,6 @@ int main(int argc, char** argv) {
             free(recv_values);
 
             time_print("1 update graph", world_rank);
-
-            // time_print("update min graph", world_rank);
         } else {
             int* result = malloc(NODE_COUNT * sizeof(int));
             minus_array(result, NODE_COUNT);
@@ -372,7 +403,6 @@ int main(int argc, char** argv) {
                 unique_roots[roots[i]] += 1;
             }
 
-            printf("[ID:%d][%d] Num components: %d\n", world_rank, count, num_components);
             i = 0;
             for (i; i < NODE_COUNT; i++) {
                 if (unique_roots[i] == -1)
@@ -394,12 +424,8 @@ int main(int argc, char** argv) {
                     }
                 }
 
-                printf("[ID:%d][%d] Done\n", world_rank, count);
-                //if (world_rank == 1) printf("min = %d\n", min);
-
                 int* recv_val = malloc(1*sizeof(int));
-                //if (world_rank==0) printf("Root: %d: val: %d\n", root, min);
-                //if (world_rank==0) print_array(roots,"roots", NODE_COUNT);
+
                 MPI_Allreduce(
                     &min,
                     recv_val,
@@ -413,12 +439,9 @@ int main(int argc, char** argv) {
                 free(recv_val);
             }
 
-            print_array(recv_buff, "recv_buff", NODE_COUNT);
-
             free(unique_roots);
             time_print("2 All gather", world_rank);
 
-            //update_min_graph_from_roots(roots, graph, min_graph, recv_buff, unique_roots);
             update_min_graph_from_roots_not_id(recv_buff, graph, min_graph);
             time_print("2 updated min graph", world_rank);
             free(recv_buff);
@@ -436,7 +459,6 @@ int main(int argc, char** argv) {
         }
         free(visited);
 
-        //if (world_rank==1) printf("d0ne\n");
         time_print("Find root", world_rank);
 
         if (world_rank == 0) {
@@ -450,17 +472,17 @@ int main(int argc, char** argv) {
         num_components = find_num_components(roots);
         if (num_components == 1) {
             if ( world_rank == 0 ) {
-                print_matrix(min_graph);
+                //print_matrix(min_graph);
             }
             break;
         }
-
 
         prune_graph(roots, graph);
         time_print("Prune graph", world_rank);
         count++;
     }
     time_print("Finished computing MST", world_rank);
+    if (world_rank == 0) printf("[ID:%d] Total time: %f\n", world_rank, MPI_Wtime() - start_time);
     // Finalize the MPI environment. No more MPI calls can be made after this
     MPI_Finalize();
 }

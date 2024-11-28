@@ -31,7 +31,7 @@ for i in values:
 
 x = [i for i in range(1,maxx)]
 
-plt.plot(x, values["2 All gather"], label="All gather 2")
+#plt.plot(x, values["2 All gather"], label="All gather 2")
 #plt.plot(x, values["Find root"])
 plt.plot(x, values["Prune graph"], label="Prune graph")
 plt.xlabel("Cycle")
