@@ -9,7 +9,7 @@
 //# define DEBUG
 # define LOGGING
 
-int NODE_COUNT = 40000;
+int NODE_COUNT = 20000;
 int MAX_EDGE_VALUE = __INT_MAX__;
 
 int MY_NODES_FROM = 0;
@@ -17,6 +17,11 @@ int MY_NODES_TO = 100;
 
 double last_time = 0.0;
 double start_time = 0.0;
+
+typedef struct {
+    int weight;
+    int from;
+} Edge;
 
 #define NULL ((void *)0)
 
@@ -36,30 +41,44 @@ int** allocate_and_init_matrix() {
     int** min_graph = (int**)malloc(NODE_COUNT * sizeof(int*));
     for (int i = 0; i < NODE_COUNT; i++)
     {
-        min_graph[i] = (int*)calloc(NODE_COUNT, sizeof(int));
+        min_graph[i] = (int*)calloc(i+1, sizeof(int));
     }
     return min_graph;
+}
+
+int get_from_matrix(int** matrix, int row, int col) {
+    if (row < col) {
+        return matrix[col][row];
+    } else {
+        return matrix[row][col];
+    }
+}
+
+void set_to_matrix(int** matrix, int row, int col, int value) {
+    if (row < col) {
+        matrix[col][row] = value;
+    } else {
+        matrix[row][col] = value;
+    }
 }
 
 int** fill_graph() {
     srand(127);
     int** matrix = allocate_and_init_matrix();
-
     int* used_values = (int*)calloc( NODE_COUNT * NODE_COUNT * 4, sizeof(int));
 
     //#pragma omp parallel for
     for (int i = 0; i < NODE_COUNT; i++) {
-        for (int j = 0; j < NODE_COUNT; j++) {
+        for (int j = 0; j < i; j++) {
             if (i == j) {
-                matrix[i][j] = -1;
+                set_to_matrix(matrix, i, j, -1);
             } else {
                 int gen;
                 do {
-                        gen = rand() % (NODE_COUNT * NODE_COUNT * 4);
+                    gen = rand() % (NODE_COUNT * NODE_COUNT * 4);
                 } while (used_values[gen]);
                 used_values[gen] = 1;
-                matrix[i][j] = gen;
-                matrix[j][i] = gen;
+                set_to_matrix(matrix, i, j, gen);
             }
         }
     }
@@ -82,7 +101,7 @@ int** read_graph() {
         char* token = strtok(line, " ");
         while (token != NULL) {
             //printf("col: %d, row: %d\n", col_count, row_count);
-            matrix[row_count][col_count++] = atoi(token);
+            set_to_matrix(matrix, row_count, col_count++, atoi(token));
             if (col_count == NODE_COUNT) {
                 col_count = 0;
                 row_count++;
@@ -107,7 +126,7 @@ int find_lightest_edge(int** graph, int node_id) {
     int min = MAX_EDGE_VALUE;
     int min_id = -1;
     for (i; i < NODE_COUNT; i++) {
-        int act = graph[node_id][i];
+        int act = get_from_matrix(graph, node_id, i);
         if (act != -1 && act < min) {
             min = act;
             min_id = i;
@@ -130,8 +149,7 @@ void update_min_graph(int* min_values, int** min_graph) {
         }
         else {
             // Setting to 1 means that that edge is included
-            min_graph[i][act] = 1;
-            min_graph[act][i] = 1;
+            set_to_matrix(min_graph, i, act, 1);
         }
     }
 }
@@ -145,7 +163,7 @@ int find_root(int node_id, int** min_graph, int* visited, int min_reported, int*
     int min_root = min_reported;
     int i = 0;
     for (i; i < NODE_COUNT; i++) {
-        if (min_graph[node_id][i] == 1) {
+        if (get_from_matrix(min_graph, node_id, i) == 1) {
             int act_root = find_root(i, min_graph, visited, min_root, roots);
             if (act_root != -1 && act_root < min_root) {
                 min_root = act_root;
@@ -167,9 +185,8 @@ void prune_graph(int* roots, int** graph) {
         int j = 0;
         for (j; j < NODE_COUNT; j++)
         {
-            if (graph[i][j] != -1 && roots[i] == roots[j]) {
-                graph[i][j] = -1;
-                graph[j][i] = -1;
+            if (get_from_matrix(graph, i, j) != -1 && roots[i] == roots[j]) {
+                set_to_matrix(graph, i, j, -1);
             }
         }
     }
@@ -180,9 +197,9 @@ void print_matrix(int** matrix) {
     // Print the adjacency matrix
     for (int i = 0; i < NODE_COUNT; i++)
     {
-        for (int j = 0; j < NODE_COUNT; j++)
+        for (int j = 0; j < i; j++)
         {
-            printf("%d ", matrix[i][j]);
+            printf("%d ", get_from_matrix(matrix, i, j));
         }
         printf("\n");
     }
@@ -261,8 +278,9 @@ int find_min_components(int*roots, int** graph, int* result) {
         int min_id = -1;
         int j = 0;
         for (j; j < NODE_COUNT; j++) {
-            if (graph[i][j] != -1 && graph[i][j] < min) {
-                min = graph[i][j];
+            int act = get_from_matrix(graph, i, j);
+            if (act != -1 && act < min) {
+                min = act;
                 min_id = j;
             }
         }
@@ -285,33 +303,29 @@ void update_min_graph_from_roots(int* roots, int** graph, int** min_graph, int* 
             for (j; j < NODE_COUNT; j++) {
                 // fin the min inside the values of that root
                 if (roots[j] == i) {
-                    if (graph[j][result[j]] < min) {
-                        min = graph[j][result[j]];
+                    int act = get_from_matrix(graph, j, result[j]);
+                    if (act < min) {
+                        min = act;
                         min_id_from = j;
                         min_id_to = result[j];
                     }
                 }
             }
-            min_graph[min_id_from][min_id_to] = 1;
-            min_graph[min_id_to][min_id_from] = 1;
+            set_to_matrix(min_graph, min_id_from, min_id_to, 1);
         }
     }
 }
 
-void update_min_graph_from_roots_not_id(int* root_mins, int**graph, int** min_graph) {
+void update_min_graph_from_roots_not_id(Edge* root_mins, int**graph, int** min_graph) {
     #pragma omp parallel for
     for (int i=0; i < NODE_COUNT; i++) {
-        if (root_mins[i] != -1) {
-            int root_min_edge_value = root_mins[i];
+        if (root_mins[i].weight != -1) {
+            int root_min_edge_value = root_mins[i].weight;
             for (int j=0; j < NODE_COUNT; j++) {
-                int k = 0;
-                for (k; k < NODE_COUNT; k++) {
-                    if (graph[j][k] != -1 && graph[j][k] == root_min_edge_value) {
-                        min_graph[j][k] = 1;
-                        min_graph[k][j] = 1;
-                        graph[j][k] = -1;
-                        graph[k][j] = -1;
-                    }
+                int act = get_from_matrix(graph, root_mins[i].from, j);
+                if (act != -1 && act == root_min_edge_value) {
+                    set_to_matrix(min_graph, root_mins[i].from, j, 1);
+                    set_to_matrix(graph, root_mins[i].from, j, -1);
                 }
             }
         }
@@ -332,6 +346,7 @@ int main(int argc, char** argv) {
     MPI_Comm_rank(MPI_COMM_WORLD, &world_rank);
 
     time_print("Start", world_rank);
+    //print_matrix(graph);
 
 #ifdef LOGGING
     if (world_rank == 0) printf("[START] NODE_COUNT:%d,process_count:%d\n", NODE_COUNT, process_count);
@@ -390,17 +405,21 @@ int main(int argc, char** argv) {
 
             find_min_components(roots, graph, result);
 
-            int* recv_buff = malloc(NODE_COUNT * sizeof(int));
-            minus_array(recv_buff, NODE_COUNT);
+            Edge* recv_buff = malloc(NODE_COUNT * sizeof(Edge));
+            int i = 0;
+            for (i; i < NODE_COUNT; i++) {
+                recv_buff[i].weight = -1;
+                recv_buff[i].from = -1;
+            }
 
             time_print("2 before all gather", world_rank);
 
             int* unique_roots = malloc(NODE_COUNT * sizeof(int));
             minus_array(unique_roots, NODE_COUNT);
 
-            int i = 0;
-            for (i; i< NODE_COUNT; i++) {
-                unique_roots[roots[i]] += 1;
+            int ii = 0;
+            for (ii; ii< NODE_COUNT; ii++) {
+                unique_roots[roots[ii]] += 1;
             }
 
             i = 0;
@@ -410,28 +429,34 @@ int main(int argc, char** argv) {
 
                 int root = i;
                 int min = MAX_EDGE_VALUE;
+                int min_from = 0;
                 int j = 0;
                 for (j; j < NODE_COUNT; j++) {
                     if (result[j] == -1)
                         continue;
 
                     if (roots[j] == root) {
-                        if (graph[j][result[j]] != -1) {
-                            if(graph[j][result[j]] < min) {
-                                min = graph[j][result[j]];
+                        int act = get_from_matrix(graph, j, result[j]);
+                        if (act != -1) {
+                            if(act < min) {
+                                min = act;
+                                min_from = j;
                             }
                         }
                     }
                 }
 
-                int* recv_val = malloc(1*sizeof(int));
+                //int* recv_val = malloc(1*sizeof(int));
+                Edge local_pair = {min, min_from};
+                //printf("%d %d\n", local_pair.weight, local_pair.from);
+                Edge* recv_val = malloc(sizeof(Edge));
 
                 MPI_Allreduce(
-                    &min,
+                    &local_pair,
                     recv_val,
                     1,
-                    MPI_INT,
-                    MPI_MIN,
+                    MPI_2INT,
+                    MPI_MINLOC,
                     MPI_COMM_WORLD
                 );
 
