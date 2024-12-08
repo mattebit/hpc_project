@@ -1,204 +1,124 @@
 #include <stdio.h>
 #include <stdlib.h>
-#include <stdbool.h>
+#include <math.h>
+#include <omp.h>
 #include <time.h>
 #include <stdint.h>
-#include <string.h>
-#include <omp.h>
 
-// Improved random number generation
+// Struct to hold edge information
 typedef struct {
-    uint64_t state;
-} xorshift64_state;
+    uint64_t start_vertex;
+    uint64_t end_vertex;
+    double weight;
+} Edge;
 
-// Fast XorShift random number generator
-uint64_t xorshift64(xorshift64_state *state) {
-    state->state ^= state->state << 13;
-    state->state ^= state->state >> 7;
-    state->state ^= state->state << 17;
-    return state->state;
-}
+// Parallel Kronecker Graph Generator
+Edge* generate_kronecker_graph(int scale, int edgefactor, uint64_t* num_edges) {
+    // Set number of vertices and edges
+    uint64_t N = 1ULL << scale;
+    uint64_t M = edgefactor * N;
+    *num_edges = M;
 
-// Graph generation parameters
-typedef struct {
-    int64_t vertex_count;     // Total number of vertices
-    int edge_density;         // Percentage of possible edges to include (1-100)
-    int min_weight;           // Minimum edge weight
-    int max_weight;           // Maximum edge weight
-    const char* filename;     // Output filename
-} GraphConfig;
+    // Initiator probabilities
+    double A = 0.57, B = 0.19, C = 0.19;
+    double ab = A + B;
+    double c_norm = C / (1 - (A + B));
+    double a_norm = A / (A + B);
 
-// Bit vector for edge tracking to reduce memory usage
-typedef struct {
-    uint64_t* bits;
-    int64_t vertices;
-} EdgeBitmap;
-
-// Initialize bit vector
-EdgeBitmap* create_edge_bitmap(int64_t vertices) {
-    EdgeBitmap* bitmap = malloc(sizeof(EdgeBitmap));
-    if (!bitmap) {
-        perror("Memory allocation failed for bitmap");
+    // Allocate memory for edges
+    Edge* edges = (Edge*)malloc(M * sizeof(Edge));
+    if (!edges) {
+        fprintf(stderr, "Memory allocation failed\n");
         exit(1);
     }
-    
-    // Calculate number of 64-bit words needed
-    int64_t bit_words = (vertices * vertices + 63) / 64;
-    bitmap->bits = calloc(bit_words, sizeof(uint64_t));
-    
-    if (!bitmap->bits) {
-        free(bitmap);
-        perror("Memory allocation failed for bitmap bits");
-        exit(1);
-    }
-    
-    bitmap->vertices = vertices;
-    return bitmap;
-}
 
-// Check if an edge exists using bit manipulation
-bool edge_exists(EdgeBitmap* bitmap, int64_t src, int64_t dest) {
-    if (src == dest) return true;
-    
-    int64_t index = src * bitmap->vertices + dest;
-    int64_t word_index = index / 64;
-    int64_t bit_index = index % 64;
-    
-    return (bitmap->bits[word_index] & (1ULL << bit_index)) != 0;
-}
+    // Seed random number generator
+    srand(time(NULL));
 
-// Mark an edge in the bit vector
-void mark_edge(EdgeBitmap* bitmap, int64_t src, int64_t dest) {
-    int64_t index = src * bitmap->vertices + dest;
-    int64_t word_index = index / 64;
-    int64_t bit_index = index % 64;
-    
-    bitmap->bits[word_index] |= (1ULL << bit_index);
-}
-
-// Free bitmap memory
-void free_edge_bitmap(EdgeBitmap* bitmap) {
-    if (bitmap) {
-        free(bitmap->bits);
-        free(bitmap);
-    }
-}
-
-// Improved random range function
-int64_t random_range(xorshift64_state* rng, int64_t min, int64_t max) {
-    uint64_t range = max - min + 1;
-    return min + (xorshift64(rng) % range);
-}
-
-void generate_large_graph(GraphConfig config) {
-    // Open output file with larger buffer
-    FILE* file = fopen(config.filename, "w");
-    if (!file) {
-        perror("Error opening output file");
-        exit(1);
-    }
-    setvbuf(file, NULL, _IOFBF, 1024 * 1024);  // 1 MB buffer
-
-    // Calculate max possible edges
-    int64_t max_possible_edges = (config.vertex_count * (config.vertex_count - 1)) / 2;
-    int64_t target_edge_count = (max_possible_edges * config.edge_density) / 100;
-
-    // Create edge bitmap for tracking
-    EdgeBitmap* edge_bitmap = create_edge_bitmap(config.vertex_count);
-
-    // Initialize random number generator
-    xorshift64_state rng = {.state = time(NULL)};
-
-    // Write header
-    fprintf(file, "%lld %lld\n", (long long)config.vertex_count, (long long)(target_edge_count * 2));
-
-    // Generate edges in parallel
-    int64_t edge_count = 0;
+    // Parallel generation of edges
     #pragma omp parallel
     {
-        // Each thread has its own random number generator state
-        xorshift64_state local_rng = rng;
-        local_rng.state += omp_get_thread_num();
+        // Use thread-local random state to avoid contention
+        unsigned int seed = omp_get_thread_num() + time(NULL);
 
-        // Temporary buffer for each thread
-        char* buffer = malloc(1024 * 1024);  // 1 MB buffer
-        int buffer_pos = 0;
+        // Parallel loop over edges
+        #pragma omp for
+        for (uint64_t k = 0; k < M; k++) {
+            uint64_t ii = 0, jj = 0;
 
-        #pragma omp for reduction(+:edge_count)
-        for (int64_t i = 0; i < target_edge_count; i++) {
-            while (true) {
-                // Ensure different source and destination
-                int64_t src = random_range(&local_rng, 0, config.vertex_count - 2);
-                int64_t dest = random_range(&local_rng, src + 1, config.vertex_count - 1);
+            // Kronecker graph generation for each edge
+            for (int ib = 0; ib < scale; ib++) {
+                // Generate random values
+                double r1 = (double)rand_r(&seed) / RAND_MAX;
+                double r2 = (double)rand_r(&seed) / RAND_MAX;
 
-                // Check if edge already exists
-                if (!edge_exists(edge_bitmap, src, dest)) {
-                    int weight = random_range(&local_rng, config.min_weight, config.max_weight);
+                // Set bits based on probabilities
+                int ii_bit = (r1 > ab) ? 1 : 0;
+                int jj_bit = (r2 > (c_norm * ii_bit + a_norm * (1 - ii_bit))) ? 1 : 0;
 
-                    // Write edge in both directions for undirected graph
-                    buffer_pos += snprintf(buffer + buffer_pos, 1024 * 1024 - buffer_pos,
-                                           "%lld %lld %d\n", (long long)src, (long long)dest, weight);
-                    buffer_pos += snprintf(buffer + buffer_pos, 1024 * 1024 - buffer_pos,
-                                           "%lld %lld %d\n", (long long)dest, (long long)src, weight);
-
-                    // Mark edges to prevent duplicates
-                    mark_edge(edge_bitmap, src, dest);
-                    mark_edge(edge_bitmap, dest, src);
-
-                    edge_count++;
-                    break;
-                }
+                // Update vertex indices
+                ii |= (ii_bit << ib);
+                jj |= (jj_bit << ib);
             }
 
-            // Flush buffer if full
-            if (buffer_pos > 1024 * 1024 - 100) {
-                #pragma omp critical
-                {
-                    fwrite(buffer, 1, buffer_pos, file);
-                }
-                buffer_pos = 0;
-            }
+            // Generate weight
+            double weight = (double)rand_r(&seed) / RAND_MAX;
+
+            // Store edge
+            edges[k].start_vertex = ii;
+            edges[k].end_vertex = jj;
+            edges[k].weight = weight;
         }
-
-        // Flush remaining buffer
-        if (buffer_pos > 0) {
-            #pragma omp critical
-            {
-                fwrite(buffer, 1, buffer_pos, file);
-            }
-        }
-
-        free(buffer);
     }
 
-    // Clean up
-    free_edge_bitmap(edge_bitmap);
-    fclose(file);
+    // Permute vertex labels
+    #pragma omp parallel for
+    for (uint64_t k = 0; k < M; k++) {
+        edges[k].start_vertex = (edges[k].start_vertex * N) % N;
+        edges[k].end_vertex = (edges[k].end_vertex * N) % N;
+    }
 
-    printf("Graph Generation Complete:\n");
-    printf("- Vertices: %lld\n", (long long)config.vertex_count);
-    printf("- Target Edges: %lld\n", (long long)(target_edge_count * 2));
-    printf("- File: %s\n", config.filename);
+    return edges;
+}
+
+// Function to write edges to a file
+void write_edges_to_file(const char* filename, Edge* edges, uint64_t num_edges) {
+    FILE* f = fopen(filename, "w");
+    if (!f) {
+        fprintf(stderr, "Cannot open file for writing\n");
+        return;
+    }
+
+    for (uint64_t i = 0; i < num_edges; i++) {
+        fprintf(f, "%lu %lu %f\n", 
+                edges[i].start_vertex, 
+                edges[i].end_vertex, 
+                edges[i].weight);
+    }
+
+    fclose(f);
 }
 
 int main(int argc, char* argv[]) {
-    // Configurable graph generation parameters
-    GraphConfig config = {
-        .vertex_count = 50000,    // Increased to 100k
-        .edge_density = 20,         // 25% of possible edges
-        .min_weight = 1,            // Minimum edge weight
-        .max_weight = 2000,         // Maximum edge weight
-        .filename = "large_graph.txt"  // Output filename
-    };
+    // Check command-line arguments
+    if (argc != 3) {
+        fprintf(stderr, "Usage: %s <SCALE> <EDGEFACTOR>\n", argv[0]);
+        return 1;
+    }
 
-    // Optional command-line parameter overrides
-    if (argc > 1) config.vertex_count = atoll(argv[1]);
-    if (argc > 2) config.edge_density = atoi(argv[2]);
-    if (argc > 3) config.filename = argv[3];
+    // Parse arguments
+    int scale = atoi(argv[1]);
+    int edgefactor = atoi(argv[2]);
 
     // Generate graph
-    printf("Generating large graph...\n");
-    generate_large_graph(config);
+    uint64_t num_edges;
+    Edge* edges = generate_kronecker_graph(scale, edgefactor, &num_edges);
+
+    // Write edges to file
+    write_edges_to_file("kronecker_graph.txt", edges, num_edges);
+
+    // Cleanup
+    free(edges);
 
     return 0;
 }

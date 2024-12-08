@@ -32,13 +32,25 @@ DisjointSet* createDisjointSet(int n) {
     return ds;
 }
 
-// Find with path compression
+// Modified find operation with pointer jumping
 int find(DisjointSet* ds, int x) {
-    if (ds->parent[x] != x)
-        ds->parent[x] = find(ds, ds->parent[x]);
-    return ds->parent[x];
+    // First pass: Find the root
+    int root = x;
+    while (ds->parent[root] != root) {
+        root = ds->parent[root];
+    }
+    
+    // Second pass: Path compression with pointer jumping
+    int current = x;
+    int next;
+    while (current != root) {
+        next = ds->parent[current];
+        ds->parent[current] = root;
+        current = next;
+    }
+    
+    return root;
 }
-
 // Union by rank
 void unionSets(DisjointSet* ds, int x, int y) {
     int rootX = find(ds, x);
@@ -57,13 +69,8 @@ void unionSets(DisjointSet* ds, int x, int y) {
     }
 }
 
-// Comparison function for sorting edges
-int compareEdges(const void* a, const void* b) {
-    return ((Edge*)a)->weight - ((Edge*)b)->weight;
-}
-
-// Borůvka's algorithm for Minimum Spanning Tree
-Edge* boruvkaMST(int** graph, int V, int* mstEdgeCount) {
+// Borůvka's algorithm for Minimum Spanning Tree using edge list
+Edge* boruvkaMST(Edge* edges, int V, int E, int* mstEdgeCount) {
     DisjointSet* ds = createDisjointSet(V);
     Edge* mst = malloc((V-1) * sizeof(Edge));  // MST has V-1 edges
     *mstEdgeCount = 0;
@@ -80,21 +87,21 @@ Edge* boruvkaMST(int** graph, int V, int* mstEdgeCount) {
         }
 
         // Find cheapest edges
-        for (int i = 0; i < V; i++) {
-            for (int j = 0; j < V; j++) {
-                if (graph[i][j] == -1) continue;  // Skip self-loops
-                
-                int rootI = find(ds, i);
-                int rootJ = find(ds, j);
+        for (int i = 0; i < E; i++) {
+            int src = edges[i].src;
+            int dest = edges[i].dest;
+            int weight = edges[i].weight;
 
-                if (rootI != rootJ) {
-                    // Update cheapest edge for both components
-                    if (graph[i][j] < cheapestEdge[rootI].weight) {
-                        cheapestEdge[rootI] = (Edge){i, j, graph[i][j]};
-                    }
-                    if (graph[i][j] < cheapestEdge[rootJ].weight) {
-                        cheapestEdge[rootJ] = (Edge){i, j, graph[i][j]};
-                    }
+            int rootSrc = find(ds, src);
+            int rootDest = find(ds, dest);
+
+            if (rootSrc != rootDest) {
+                // Update cheapest edge for both components
+                if (weight < cheapestEdge[rootSrc].weight) {
+                    cheapestEdge[rootSrc] = edges[i];
+                }
+                if (weight < cheapestEdge[rootDest].weight) {
+                    cheapestEdge[rootDest] = edges[i];
                 }
             }
         }
@@ -122,78 +129,63 @@ Edge* boruvkaMST(int** graph, int V, int* mstEdgeCount) {
     return mst;
 }
 
-// Initialize matrix from code
-int** allocate_and_init_matrix(int V) {
-    int** matrix = (int**)malloc(V * sizeof(int*));
-    for (int i = 0; i < V; i++) {
-        matrix[i] = (int*)calloc(V, sizeof(int));
+// Function to read graph from file
+void readGraphFromFile(const char *filename, int* V, int* E, Edge** edges) {
+    FILE* file = fopen(filename, "r");
+    if (!file) {
+        fprintf(stderr, "Error opening file %s\n", filename);
+        exit(1);
     }
-    return matrix;
-}
 
-// Fill matrix to ensure no edge has the same value
-void fill_graph(int*** graph, int V) {
-    srand(127);
-    int* used_values = calloc(V * V * 4, sizeof(int));
-    
-    for (int i = 0; i < V; i++) {
-        for (int j = 0; j < V; j++) {
-            if (i == j) {
-                (*graph)[i][j] = -1;
-            } else {
-                int gen;
-                do {
-                    gen = rand() % (V * V * 4);
-                } while (used_values[gen]);
-                used_values[gen] = 1;
-                (*graph)[i][j] = gen;
-                (*graph)[j][i] = gen;
-            }
+    if (fscanf(file, "%d %d", V, E) != 2 || *V <= 0 || *E <= 0) {
+        fprintf(stderr, "Invalid graph metadata\n");
+        fclose(file);
+        exit(1);
+    }
+
+    *edges = (Edge*)malloc(*E * sizeof(Edge));
+    if (!*edges) {
+        fprintf(stderr, "Memory allocation failed\n");
+        fclose(file);
+        exit(1);
+    }
+
+    for (int i = 0; i < *E; i++) {
+        if (fscanf(file, "%d %d %d", &(*edges)[i].src, &(*edges)[i].dest, &(*edges)[i].weight) != 3 ||
+            (*edges)[i].src < 0 || (*edges)[i].src >= *V || (*edges)[i].dest < 0 || (*edges)[i].dest >= *V || (*edges)[i].weight < 0) {
+            fprintf(stderr, "Invalid edge data\n");
+            free(*edges);
+            fclose(file);
+            exit(1);
         }
     }
-    free(used_values);
-}
-
-// Convert adjacency matrix to edge list
-Edge* convertMatrixToEdgeList(int** graph, int V, int* edgeCount) {
-    int maxEdges = V * (V - 1) / 2;
-    Edge* edges = malloc(maxEdges * sizeof(Edge));
-    *edgeCount = 0;
-
-    for (int i = 0; i < V; i++) {
-        for (int j = i + 1; j < V; j++) {
-            if (graph[i][j] != -1) {
-                edges[*edgeCount].src = i;
-                edges[*edgeCount].dest = j;
-                edges[*edgeCount].weight = graph[i][j];
-                (*edgeCount)++;
-            }
-        }
-    }
-
-    return edges;
+    fclose(file);
 }
 
 int main(int argc, char* argv[]) {
-    int V = 20000;  // Example vertex count
-    int** graph = allocate_and_init_matrix(V);
-    fill_graph(&graph, V);
+    if (argc != 2) {
+        fprintf(stderr, "Usage: %s <input_file>\n", argv[0]);
+        return 1;
+    }
 
-    int edgeCount;
-    Edge* edges = convertMatrixToEdgeList(graph, V, &edgeCount);
+    int V, E;
+    Edge* edges = NULL;
+
+    // Read graph from file
+    readGraphFromFile(argv[1], &V, &E, &edges);
 
     printf("Computing Minimum Spanning Tree...\n");
     clock_t start = clock();
 
     int mstEdgeCount = 0;
-    Edge* mst = boruvkaMST(graph, V, &mstEdgeCount);
+    Edge* mst = boruvkaMST(edges, V, E, &mstEdgeCount);
 
     clock_t end = clock();
     double cpu_time_used = ((double)(end - start)) / CLOCKS_PER_SEC;
 
     printf("\nPerformance Metrics:\n");
     printf("Vertices: %d\n", V);
-    printf("Edges: %d\n", edgeCount);
+    printf("Edges: %d\n", E);
     printf("MST Edges: %d\n", mstEdgeCount);
     printf("Computation Time: %.4f seconds\n", cpu_time_used);
 
@@ -204,10 +196,6 @@ int main(int argc, char* argv[]) {
     printf("Total MST Weight: %lld\n", totalWeight);
 
     // Cleanup
-    for (int i = 0; i < V; i++) {
-        free(graph[i]);
-    }
-    free(graph);
     free(edges);
     free(mst);
 
