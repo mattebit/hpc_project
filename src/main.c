@@ -238,6 +238,15 @@ void print_matrix(int** matrix) {
     }
 }
 
+void print_full_matrix(int** matrix) {
+    for (int i = 0; i < NODE_COUNT; i++) {
+        for (int j = 0; j < NODE_COUNT; j++) {
+            printf("%d ", get_from_matrix(matrix, i, j));
+        }
+        printf("\n");
+    }
+}
+
 void zero_array(int* array, int size) {
     #pragma omp simd
     for (int i = 0; i < size; i++) {
@@ -456,6 +465,7 @@ int main(int argc, char** argv) {
             }
 
             bool can_connect = find_min_components(parent, graph, min_edges);
+            // can_connect non sarà mai false. C'è un controllo sulle componenti alla fine di ogni ciclo
 
             Edge recv_buff[NODE_COUNT];
             for (int i = 0; i < NODE_COUNT; i++) {
@@ -464,10 +474,19 @@ int main(int argc, char** argv) {
                 recv_buff[i].to = -1;
             }
 
+            int* roots = malloc(NODE_COUNT * sizeof(int));
+            zero_array(roots, NODE_COUNT);
+
+            for (int i = 0; i<NODE_COUNT; i++) {
+                roots[parent[i]]++;
+            } // TODO: si può fare meglio di così
+
             time_print("2 before all gather", world_rank);
             for (int i = 0; i < NODE_COUNT && can_connect; i++) {
+                if (roots[i] == 0) continue;
+
                 int root_i = find(parent, i);
-                Edge local_pair = {MAX_EDGE_VALUE, 0, 0};   
+                Edge local_pair = {MAX_EDGE_VALUE, 0, 0};
                 for (int j = 0; j < vertex_per_process; j++) {
                     //there cannot exist a minimum weight
                     if (min_edges[j].weight == -1)
@@ -483,7 +502,7 @@ int main(int argc, char** argv) {
                     }
                 }
 
-                // printf("lightest edge from [PID: %d]-> w(%d), u(%d), v(%d)\n", world_rank, local_pair.weight, local_pair.from, local_pair.to);
+                //printf("lightest edge from [PID: %d]-> w(%d), u(%d), v(%d)\n", world_rank, local_pair.weight, local_pair.from, local_pair.to);
                 
                 Edge recv_val;
                 MPI_Allreduce(
@@ -495,6 +514,7 @@ int main(int argc, char** argv) {
                     MPI_COMM_WORLD
                 );
 
+                //if (world_rank==0) printf("root=%d: %d, %d, %d\n",root_i, recv_val.weight, recv_val.from, recv_val.to);
                 recv_buff[root_i] = recv_val;
             }
 
@@ -517,7 +537,7 @@ int main(int argc, char** argv) {
         num_components = find_num_components(parent);
         if (num_components == 1) {
             if (world_rank == 0) {
-                // print_matrix(min_graph);
+                //print_full_matrix(min_graph);
             }
             break;
         }
