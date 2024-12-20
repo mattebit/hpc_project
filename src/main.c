@@ -6,11 +6,12 @@
 #include <string.h>
 #include <stdbool.h>
 #include <omp.h>
+#include <stdint.h>
 
 //# define DEBUG
 # define LOGGING
 
-int NODE_COUNT = 20000;
+int NODE_COUNT = 10000;
 int MAX_EDGE_VALUE = __INT_MAX__;
 
 int MY_NODES_FROM = 0;
@@ -147,20 +148,88 @@ int** read_graph() {
     return matrix;
 }
 
+int** read_csr_graph() {
+    int** graph = allocate_and_init_matrix();
+
+    FILE* file = fopen("graph500.txt", "r");
+    if (!file) {
+        fprintf(stderr, "Error opening file %s\n", "graph500.txt");
+        exit(1);
+    }
+
+    int V, E;
+
+    // Read header
+    if (fscanf(file, "%d %d", &V, &E) != 2) {
+        fprintf(stderr, "Invalid graph header\n");
+        fclose(file);
+        exit(1);
+    }
+
+    // Allocate arrays
+    int64_t* row_starts = (int64_t*)malloc((V + 1) * sizeof(int64_t));
+    int64_t* col_indices = (int64_t*)malloc(E * sizeof(int64_t));
+
+    // Read row_starts
+    for (int i = 0; i <= V; i++) {
+        if (fscanf(file, "%ld", &row_starts[i]) != 1) {
+            fprintf(stderr, "Error reading row_starts\n");
+            fclose(file);
+            exit(1);
+        }
+    }
+
+    // Read column indices
+    for (int i = 0; i < E; i++) {
+        if (fscanf(file, "%ld", &col_indices[i]) != 1) {
+            fprintf(stderr, "Error reading col_indices\n");
+            fclose(file);
+            exit(1);
+        }
+    }
+
+    // Convert CSR to triangular adjacency matrix
+    for (int i = 0; i < V; i++) {
+        for (int64_t j = row_starts[i]; j < row_starts[i + 1]; j++) {
+            int dest = col_indices[j];
+            // Generate deterministic weight
+            int weight = (i * 31 + dest) % 1000 + 1;
+            
+            // Store in lower triangular part
+            // Skipping self loops
+            if (i != dest) set_to_matrix(graph, i, dest, weight);
+        }
+    }
+
+    // Cleanup
+    free(row_starts);
+    free(col_indices);
+    fclose(file);
+
+    return graph;
+}
+
 /**
  * Finds the lightest edge among the edges of the specified node and returns the id of the node connected by that edge
  */
 int find_lightest_edge(int** graph, int node_id) {
     int min = MAX_EDGE_VALUE;
     int min_id_to = -1;
+
+    #pragma omp parallel for
     for (int i = 0; i < NODE_COUNT; i++) {
         if (i == node_id) {
             continue;
         }
         int act = get_from_matrix(graph, node_id, i);
-        if (act != -1 && act < min) {
-            min = act;
-            min_id_to = i;
+        if (act > 0) {
+            #pragma omp critical
+            {
+                if (act < min) {
+                    min = act;
+                    min_id_to = i;
+                }
+            }
         }
     }
     return min_id_to;
@@ -173,7 +242,7 @@ int find_lightest_edge(int** graph, int node_id) {
 void update_min_graph(int* min_values, int** min_graph) {
     for (int i = 0; i < NODE_COUNT; i++) {
         int act = min_values[i];
-        if (act != -1) {
+        if (act > 0) {
             set_to_matrix(min_graph, i, act, 1);
         }
     }
@@ -183,47 +252,12 @@ void update_min_graph_union_find(int* parent, int * rank, int* min_values, int**
     #pragma omp parallel for
     for (int i = 0; i < NODE_COUNT; i++) {
         int act = min_values[i];
-        if (act != -1) {
+        if (act > 0) {
             #pragma omp critical  
             {
                 union_sets(parent, rank, i, act);
             }
             set_to_matrix(min_graph, i, act, 1);
-        }
-    }
-}
-
-
-// int find_root(int node_id, int** min_graph, int* visited, int min_reported, int* roots) {
-//     if (visited[node_id] == 1) {
-//         return -1;
-//     }
-
-//     visited[node_id] = 1;
-//     int min_root = min_reported;
-//     for (int i = 0; i < NODE_COUNT; i++) {
-//         if (get_from_matrix(min_graph, node_id, i) == 1) {
-//             int act_root = find_root(i, min_graph, visited, min_root, roots);
-//             if (act_root != -1 && act_root < min_root) {
-//                 min_root = act_root;
-//                 roots[node_id] = min_root;
-//             }
-//         }
-//     }
-//     roots[node_id] = min_root;
-//     return min_root;
-// }
-
-/**
- * Prunes the given graph from the edges between the same component
- */
-void prune_graph(int* parent, int** graph) {
-    #pragma omp parallel for
-    for (int i = 0; i < NODE_COUNT; i++) {
-        for (int j = 0; j < NODE_COUNT; j++) {
-            if (get_from_matrix(graph, i, j) != -1 && parent[i] == parent[j]) {
-                set_to_matrix(graph, i, j, -1);
-            }
         }
     }
 }
@@ -322,7 +356,7 @@ bool find_min_components(int* parent, int** graph, Edge* min_edges) {
         int root_i = find(parent, i);
         for (int j = 0; j < NODE_COUNT; j++) {
             int act = get_from_matrix(graph, i, j);
-            if (act != -1 && act < min) {
+            if (act > 0 && act < min) {
                 if (root_i != find(parent, j)) {
                     min = act;
                     min_id = j;
@@ -342,7 +376,7 @@ bool find_min_components(int* parent, int** graph, Edge* min_edges) {
 void update_min_graph_from_roots_not_id(int* parent, int* rank, Edge* root_mins, int** graph, int** min_graph) {
     #pragma omp parallel for
     for (int i = 0; i < NODE_COUNT; i++) {
-        if (root_mins[i].weight != -1) {
+        if (root_mins[i].weight > 0) {
             #pragma omp critical
             {
                 union_sets(parent, rank, root_mins[i].from, root_mins[i].to);
@@ -367,9 +401,9 @@ void min_edge_reduce(void* in, void* inout, int* len, MPI_Datatype* datatype) {
 int main(int argc, char** argv) {
     int** graph = fill_graph(); // generate graph before forking
     // int** graph = read_graph();
+    // int** graph = read_csr_graph();
     // print_matrix(graph);
 
-    
 
     MPI_Init(NULL, NULL);
     last_time = MPI_Wtime();
@@ -473,6 +507,7 @@ int main(int argc, char** argv) {
                 recv_buff[i].from = -1;
                 recv_buff[i].to = -1;
             }
+            
 
             int* roots = malloc(NODE_COUNT * sizeof(int));
             zero_array(roots, NODE_COUNT);
@@ -481,7 +516,10 @@ int main(int argc, char** argv) {
                 roots[parent[i]]++;
             } // TODO: si può fare meglio di così
 
+
             time_print("2 before all gather", world_rank);
+
+
             for (int i = 0; i < NODE_COUNT && can_connect; i++) {
                 if (roots[i] == 0) continue;
 
@@ -492,17 +530,12 @@ int main(int argc, char** argv) {
                     if (min_edges[j].weight == -1)
                         continue;
                     
-                    //if the node currently looking at is part of the current component
-                    //save if the min_edge found for that node is the current 
-                    //minimum for the actual component
                     if (find(parent, min_edges[j].from) == root_i) {
                         if (min_edges[j].weight < local_pair.weight) {
                             local_pair = min_edges[j];
                         }
                     }
                 }
-
-                //printf("lightest edge from [PID: %d]-> w(%d), u(%d), v(%d)\n", world_rank, local_pair.weight, local_pair.from, local_pair.to);
                 
                 Edge recv_val;
                 MPI_Allreduce(
@@ -514,7 +547,6 @@ int main(int argc, char** argv) {
                     MPI_COMM_WORLD
                 );
 
-                //if (world_rank==0) printf("root=%d: %d, %d, %d\n",root_i, recv_val.weight, recv_val.from, recv_val.to);
                 recv_buff[root_i] = recv_val;
             }
 
@@ -529,12 +561,12 @@ int main(int argc, char** argv) {
         }
 
         time_print("Find root", world_rank);
-
+    
+        num_components = find_num_components(parent);
         if (world_rank == 0) {
-            printf("Num components %d\n", find_num_components(parent));
+            printf("Num components %d\n", num_components);
         }
 
-        num_components = find_num_components(parent);
         if (num_components == 1) {
             if (world_rank == 0) {
                 //print_full_matrix(min_graph);
@@ -542,12 +574,22 @@ int main(int argc, char** argv) {
             break;
         }
 
-        prune_graph(parent, graph);
-        time_print("Prune graph", world_rank);
+        // prune_graph(parent, graph);
+        // time_print("Prune graph", world_rank);
         count++;
     }
     time_print("Finished computing MST", world_rank);
     if (world_rank == 0) printf("[ID:%d] Total time: %f\n", world_rank, MPI_Wtime() - start_time);
+
+    if (world_rank == 0) {
+        long final_mst_weight = 0;
+        for (int i = 0; i < NODE_COUNT; i++) {
+            for (int j = 0; j < NODE_COUNT; j++) {
+                if (min_graph[i][j] == 1) final_mst_weight += graph[i][j];
+            }
+        }
+        printf ("Total Weight: %ld\n", final_mst_weight);
+    }
 
     free(parent);
     free(rank);
