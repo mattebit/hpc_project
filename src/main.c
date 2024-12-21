@@ -12,6 +12,8 @@
 # define LOGGING
 
 int NODE_COUNT = 10000;
+bool GENERATE_GRAPH = true;
+char* GRAPH_PATH; // path of the graph to import
 int MAX_EDGE_VALUE = __INT_MAX__;
 
 int MY_NODES_FROM = 0;
@@ -151,9 +153,9 @@ int** read_graph() {
 int** read_csr_graph() {
     int** graph = allocate_and_init_matrix();
 
-    FILE* file = fopen("graph500.txt", "r");
+    FILE* file = fopen(GRAPH_PATH, "r");
     if (!file) {
-        fprintf(stderr, "Error opening file %s\n", "graph500.txt");
+        fprintf(stderr, "Error opening file %s\n", GRAPH_PATH);
         exit(1);
     }
 
@@ -399,11 +401,34 @@ void min_edge_reduce(void* in, void* inout, int* len, MPI_Datatype* datatype) {
 }
 
 int main(int argc, char** argv) {
-    int** graph = fill_graph(); // generate graph before forking
-    // int** graph = read_graph();
-    // int** graph = read_csr_graph();
-    // print_matrix(graph);
+    if (argc > 0) {
+        if (argc < 3) {
+            printf("Invalid number of parameters, expected \"%s NODE_COUNT GENERATE_GRAPH GRAPH_PATH\" or nothing\n", argv[0]);
+        }
+#ifdef LOGGING
+        printf("Received arguments:\n");
+        printf("argv[0] %s\n", argv[0]);
+        printf("argv[1] (NODE_COUNT) %s\n", argv[1]);
+        printf("argv[2] (GENERATE_GRAPH) %s\n", argv[2]);
+#endif
+        NODE_COUNT = atoi(argv[1]);
+        GENERATE_GRAPH = atoi(argv[2]);
+        if (!GENERATE_GRAPH) {
+#ifdef LOGGING
+            printf("argv[3] (GRAPH_PATH) %s\n", argv[3]);
+#endif
+            GRAPH_PATH = argv[3];
+        }
+    }
 
+    int** graph;
+
+    if (GENERATE_GRAPH) {
+        graph = fill_graph(); // generate graph before forking
+    } else {
+        graph = read_graph(); // TODO: why there are two versions? chose 1
+        // int** graph = read_csr_graph();
+    }
 
     MPI_Init(NULL, NULL);
     last_time = MPI_Wtime();
@@ -414,14 +439,17 @@ int main(int argc, char** argv) {
     MPI_Comm_rank(MPI_COMM_WORLD, &world_rank);
 
     time_print("Start", world_rank);
-    // print_matrix(graph);
 
 #ifdef LOGGING
     if (world_rank == 0) printf("[START] NODE_COUNT:%d,process_count:%d\n", NODE_COUNT, process_count);
 #endif
 
-    // Find indexes of which vertex this node is responsible for
+    // Find how many vertex any process is responsible for
     int vertex_per_process = NODE_COUNT / process_count;
+
+    // When the number of nodes is not divisible for the number of processes
+    // TODO: if some process has different number of nodes wrt the others there is a problem in the messages exchanges
+    // as each process expect the same amount of nodes from each process
     int remainder = NODE_COUNT % process_count;
     if (world_rank < remainder) {
         vertex_per_process++;
@@ -432,7 +460,6 @@ int main(int argc, char** argv) {
     MY_NODES_TO = MY_NODES_FROM + vertex_per_process;
 
     int** min_graph = allocate_and_init_matrix();
-
     int* parent = (int*)malloc(NODE_COUNT * sizeof(int));
     int* rank = (int*)malloc(NODE_COUNT * sizeof(int));
 
@@ -443,8 +470,6 @@ int main(int argc, char** argv) {
 
     init_union_find(parent, rank, NODE_COUNT);
 
-    time_print("Allocated stuff", world_rank);
-
     // Define custom MPI datatype for Edge
     MPI_Datatype MPI_EDGE;
     MPI_Type_contiguous(3, MPI_INT, &MPI_EDGE);
@@ -453,6 +478,10 @@ int main(int argc, char** argv) {
     // Create the reduction operation
     MPI_Op MPI_MIN_EDGE;
     MPI_Op_create((MPI_User_function*)min_edge_reduce, 1, &MPI_MIN_EDGE);
+
+    time_print("Allocated stuff", world_rank);
+
+    printf("[ID:%d] MY_NODES_FROM = %d, MYN_NODES_TO= %d\n", world_rank, MY_NODES_FROM, MY_NODES_TO);
 
     int num_components = 0;
     int count = 0;
