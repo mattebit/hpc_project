@@ -11,7 +11,7 @@
 //# define DEBUG
 # define LOGGING
 
-int NODE_COUNT = 10000;
+int NODE_COUNT = 1000;
 bool GENERATE_GRAPH = true;
 char* GRAPH_PATH; // path of the graph to import
 int MAX_EDGE_VALUE = __INT_MAX__;
@@ -401,7 +401,7 @@ void min_edge_reduce(void* in, void* inout, int* len, MPI_Datatype* datatype) {
 }
 
 int main(int argc, char** argv) {
-    if (argc > 0) {
+    if (argc > 1) {
         if (argc < 3) {
             printf("Invalid number of parameters, expected \"%s NODE_COUNT GENERATE_GRAPH GRAPH_PATH\" or nothing\n", argv[0]);
         }
