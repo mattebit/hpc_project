@@ -11,7 +11,7 @@
 //# define DEBUG
 # define LOGGING
 
-int NODE_COUNT = 1000;
+int NODE_COUNT = 20;
 bool GENERATE_GRAPH = true;
 char* GRAPH_PATH; // path of the graph to import
 int MAX_EDGE_VALUE = __INT_MAX__;
@@ -150,66 +150,101 @@ int** read_graph() {
     return matrix;
 }
 
-int** read_csr_graph() {
-    int** graph = allocate_and_init_matrix();
-
-    FILE* file = fopen(GRAPH_PATH, "r");
+// Read graph into adjacency matrix
+int** readGraphFromFile(const char * filename) {
+    FILE* file = fopen(filename, "r");
     if (!file) {
-        fprintf(stderr, "Error opening file %s\n", GRAPH_PATH);
+        perror("Error opening file");
         exit(1);
     }
 
     int V, E;
-
-    // Read header
     if (fscanf(file, "%d %d", &V, &E) != 2) {
-        fprintf(stderr, "Invalid graph header\n");
+        perror("Error reading graph metadata");
         fclose(file);
         exit(1);
     }
 
-    // Allocate arrays
-    int64_t* row_starts = (int64_t*)malloc((V + 1) * sizeof(int64_t));
-    int64_t* col_indices = (int64_t*)malloc(E * sizeof(int64_t));
+    NODE_COUNT = V; // Update NODE_COUNT based on the file
+    int ** graph = allocate_and_init_matrix();
 
-    // Read row_starts
-    for (int i = 0; i <= V; i++) {
-        if (fscanf(file, "%ld", &row_starts[i]) != 1) {
-            fprintf(stderr, "Error reading row_starts\n");
-            fclose(file);
-            exit(1);
-        }
-    }
-
-    // Read column indices
+    // Read edges
     for (int i = 0; i < E; i++) {
-        if (fscanf(file, "%ld", &col_indices[i]) != 1) {
-            fprintf(stderr, "Error reading col_indices\n");
+        int src, dest, weight;
+        if (fscanf(file, "%d %d %d", &src, &dest, &weight) != 3) {
+            perror("Error reading edges");
             fclose(file);
             exit(1);
         }
-    }
-
-    // Convert CSR to triangular adjacency matrix
-    for (int i = 0; i < V; i++) {
-        for (int64_t j = row_starts[i]; j < row_starts[i + 1]; j++) {
-            int dest = col_indices[j];
-            // Generate deterministic weight
-            int weight = (i * 31 + dest) % 1000 + 1;
-            
-            // Store in lower triangular part
-            // Skipping self loops
-            if (i != dest) set_to_matrix(graph, i, dest, weight);
+        int val = get_from_matrix(graph, src, dest);
+        if (val == 0 || val > weight) {
+            set_to_matrix(graph, src, dest, weight);
         }
     }
-
-    // Cleanup
-    free(row_starts);
-    free(col_indices);
     fclose(file);
-
     return graph;
 }
+
+// int** read_csr_graph() {
+//     int** graph = allocate_and_init_matrix();
+
+//     FILE* file = fopen(GRAPH_PATH, "r");
+//     if (!file) {
+//         fprintf(stderr, "Error opening file %s\n", GRAPH_PATH);
+//         exit(1);
+//     }
+
+//     int V, E;
+
+//     // Read header
+//     if (fscanf(file, "%d %d", &V, &E) != 2) {
+//         fprintf(stderr, "Invalid graph header\n");
+//         fclose(file);
+//         exit(1);
+//     }
+
+//     // Allocate arrays
+//     int64_t* row_starts = (int64_t*)malloc((V + 1) * sizeof(int64_t));
+//     int64_t* col_indices = (int64_t*)malloc(E * sizeof(int64_t));
+
+//     // Read row_starts
+//     for (int i = 0; i <= V; i++) {
+//         if (fscanf(file, "%ld", &row_starts[i]) != 1) {
+//             fprintf(stderr, "Error reading row_starts\n");
+//             fclose(file);
+//             exit(1);
+//         }
+//     }
+
+//     // Read column indices
+//     for (int i = 0; i < E; i++) {
+//         if (fscanf(file, "%ld", &col_indices[i]) != 1) {
+//             fprintf(stderr, "Error reading col_indices\n");
+//             fclose(file);
+//             exit(1);
+//         }
+//     }
+
+//     // Convert CSR to triangular adjacency matrix
+//     for (int i = 0; i < V; i++) {
+//         for (int64_t j = row_starts[i]; j < row_starts[i + 1]; j++) {
+//             int dest = col_indices[j];
+//             // Generate deterministic weight
+//             int weight = (i * 31 + dest) % 1000 + 1;
+            
+//             // Store in lower triangular part
+//             // Skipping self loops
+//             if (i != dest) set_to_matrix(graph, i, dest, weight);
+//         }
+//     }
+
+//     // Cleanup
+//     free(row_starts);
+//     free(col_indices);
+//     fclose(file);
+
+//     return graph;
+// }
 
 /**
  * Finds the lightest edge among the edges of the specified node and returns the id of the node connected by that edge
@@ -426,8 +461,9 @@ int main(int argc, char** argv) {
     if (GENERATE_GRAPH) {
         graph = fill_graph(); // generate graph before forking
     } else {
-        graph = read_graph(); // TODO: why there are two versions? chose 1
+        // graph = read_graph(); // TODO: why there are two versions? chose 1
         // int** graph = read_csr_graph();
+        graph = readGraphFromFile(GRAPH_PATH);
     }
 
     MPI_Init(NULL, NULL);
@@ -481,14 +517,13 @@ int main(int argc, char** argv) {
 
     time_print("Allocated stuff", world_rank);
 
-    printf("[ID:%d] MY_NODES_FROM = %d, MYN_NODES_TO= %d\n", world_rank, MY_NODES_FROM, MY_NODES_TO);
+    printf("[ID:%d] MY_NODES_FROM = %d, MYN_NODES_TO= %d, VERTEX_PER_PROCESS = %d\n", world_rank, MY_NODES_FROM, MY_NODES_TO, vertex_per_process);
 
     int num_components = 0;
     int count = 0;
     while (1) {
         if (count == 0) {
-            int* ligthest_edges = (int*)malloc(vertex_per_process * sizeof(int));
-            zero_array(ligthest_edges, vertex_per_process);
+            int* ligthest_edges = (int*)calloc(vertex_per_process, sizeof(int));
             for (int i = MY_NODES_FROM; i < MY_NODES_TO; i++) {
                 int min_id_to = find_lightest_edge(graph, i);
                 ligthest_edges[i - MY_NODES_FROM] = min_id_to;
