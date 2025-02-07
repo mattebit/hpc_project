@@ -189,11 +189,16 @@ int main(int argc, char* argv[]) {
     printf("MST Edges: %d\n", mstEdgeCount);
     printf("Computation Time: %.4f seconds\n", cpu_time_used);
 
+    // Print selected edges and calculate total weight
+    // printf("\nSelected MST Edges:\n");
+    // printf("From -> To : Weight\n");
+    // printf("-------------------\n");
     long long totalWeight = 0;
     for (int i = 0; i < mstEdgeCount; i++) {
+        // printf("%4d -> %4d : %d\n", mst[i].src, mst[i].dest, mst[i].weight);
         totalWeight += mst[i].weight;
     }
-    printf("Total MST Weight: %lld\n", totalWeight);
+    printf("\nTotal MST Weight: %lld\n", totalWeight);
 
     // Cleanup
     free(edges);
