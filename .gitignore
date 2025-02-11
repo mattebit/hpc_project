@@ -66,3 +66,6 @@ large_graph.txt
 #output of hpc data
 hpc_cmp_impl.sh*
 parallel.sh*
+
+#testing code
+new_main.c

@@ -8,7 +8,7 @@
 typedef struct {
     uint64_t start_vertex;
     uint64_t end_vertex;
-    int weight;  // Changed from double to int
+    int weight;
 } Edge;
 
 // Function to ensure graph connectivity
