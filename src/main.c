@@ -7,6 +7,9 @@
 #include <stdbool.h>
 #include <omp.h>
 #include <stdint.h>
+#include <sys/mman.h>
+#include <sys/stat.h>
+#include <fcntl.h>
 
 //# define DEBUG
 # define LOGGING
@@ -43,6 +46,7 @@ void log_message(int process_id, char* message) {
 }
 
 void init_union_find(int* parent, int* rank, int n) {
+    #pragma omp simd
     for (int i = 0; i < n; i++) {
         parent[i] = i;
         rank[i] = 0;
@@ -126,37 +130,58 @@ void set_to_matrix(int** matrix, int row, int col, int value) {
     }
 }
 
-// Read graph into adjacency matrix
-int** readGraphFromFile(const char * filename) {
+
+
+int** readGraphFromFile(const char* filename) {
+    // Open file with a large buffer for efficient reading
     FILE* file = fopen(filename, "r");
     if (!file) {
         perror("Error opening file");
         exit(1);
     }
 
-    int V, E;
-    if (fscanf(file, "%d %d", &V, &E) != 2) {
-        perror("Error reading graph metadata");
+    // Set up a large buffer for file I/O (16MB buffer)
+    char* buffer = (char*)malloc(16 * 1024 * 1024);
+    if (buffer == NULL) {
+        perror("Failed to allocate file buffer");
         fclose(file);
         exit(1);
     }
+    setvbuf(file, buffer, _IOFBF, 16 * 1024 * 1024);
 
-    NODE_COUNT = V; // Update NODE_COUNT based on the file
-    int ** graph = allocate_and_init_matrix();
+    // Read header
+    int V, E;
+    if (fscanf(file, "%d %d\n", &V, &E) != 2) {
+        perror("Error reading graph metadata");
+        free(buffer);
+        fclose(file);
+        exit(1);
+    }
+    NODE_COUNT = V;
 
-    // Read edges
+    // Allocate graph matrix
+    int** graph = allocate_and_init_matrix();
+    
+    // Read edges sequentially with buffered I/O
+    int src, dest, weight;
     for (int i = 0; i < E; i++) {
-        int src, dest, weight;
-        if (fscanf(file, "%d %d %d", &src, &dest, &weight) != 3) {
-            perror("Error reading edges");
+        if (fscanf(file, "%d %d %d\n", &src, &dest, &weight) != 3) {
+            fprintf(stderr, "Error reading edge %d\n", i);
+            free(buffer);
             fclose(file);
+            free_matrix(graph);
             exit(1);
         }
+        
+        // Update matrix only if new edge is lighter
         int val = get_from_matrix(graph, src, dest);
         if (val == 0 || val > weight) {
             set_to_matrix(graph, src, dest, weight);
         }
     }
+
+    // Cleanup
+    free(buffer);
     fclose(file);
     return graph;
 }
@@ -168,21 +193,36 @@ int find_lightest_edge(int** graph, int node_id) {
     // Initialize variables to track minimum edge
     int min_weight = MAX_EDGE_VALUE;
     int min_node_id = -1;
-    
-    // Search through all possible edges
-    for (int i = 0; i < NODE_COUNT; i++) {
-        // Skip self-loops
-        if (i == node_id) {
-            continue;
+
+
+    #pragma omp parallel
+    {
+        int local_min_weight = MAX_EDGE_VALUE;
+        int local_min_node_id = -1;
+
+        // Search through all possible edges
+        #pragma omp for nowait
+        for (int i = 0; i < NODE_COUNT; i++) {
+            // Skip self-loops
+            if (i == node_id) {
+                continue;
+            }
+            
+            // Get edge weight from adjacency matrix
+            int weight = get_from_matrix(graph, node_id, i);
+            if (weight > 0 && weight < local_min_weight) {
+                local_min_weight = weight;
+                local_min_node_id = i;
+            }
         }
-        
-        // Get edge weight from adjacency matrix
-        int weight = get_from_matrix(graph, node_id, i);
-        
+            
         // Update minimum if we found a valid lighter edge
-        if (weight > 0 && weight < min_weight) {
-            min_weight = weight;
-            min_node_id = i;
+        #pragma omp critical
+        {
+            if (local_min_weight < min_weight) {
+                min_weight = local_min_weight;
+                min_node_id = local_min_node_id;
+            }
         }
     }
     
@@ -250,6 +290,7 @@ void print_array(int* array, char* name, int size) {
 int find_num_components(int* parent) {
     bool* unique_roots = (bool*)calloc(NODE_COUNT, sizeof(bool));
     for (int i = 0; i < NODE_COUNT; i++) {
+        find(parent,i);
         unique_roots[parent[i]] = true;
     }
 
@@ -277,26 +318,39 @@ void time_print(char* desc, int world_rank) {
 bool find_min_components(int* parent, int** graph, Edge* min_edges) {
     bool can_connect = false;
 
-    // For each vertex in my partition
-    for (int i = MY_NODES_FROM; i < MY_NODES_TO; i++) {
-        int root_i = find(parent, i);
-        Edge min_edge = {MAX_EDGE_VALUE, -1, -1};
+    // Use atomic to handle the shared can_connect variable
+    #pragma omp parallel
+    {
+        bool thread_can_connect = false;
         
-        // Find minimum weight edge connecting to different component
-        for (int j = 0; j < NODE_COUNT; j++) {
-            int weight = get_from_matrix(graph, i, j);
-            if (weight <= 0) continue; // Skip invalid edges
+        // Parallelize the outer loop since each iteration is independent
+        #pragma omp for schedule(static)
+        for (int i = MY_NODES_FROM; i < MY_NODES_TO; i++) {
+            int root_i = find(parent, i);
+            Edge min_edge = {MAX_EDGE_VALUE, -1, -1};
             
-            int root_j = find(parent, j);
-            if (root_i != root_j && weight < min_edge.weight) {
-                min_edge.weight = weight;
-                min_edge.from = i;
-                min_edge.to = j;
-                can_connect = true;
+            // Find minimum weight edge connecting to different component
+            for (int j = 0; j < NODE_COUNT; j++) {
+                int weight = get_from_matrix(graph, i, j);
+                if (weight <= 0) continue; // Skip invalid edges
+                
+                int root_j = find(parent, j);
+                if (root_i != root_j && weight < min_edge.weight) {
+                    min_edge.weight = weight;
+                    min_edge.from = i;
+                    min_edge.to = j;
+                    thread_can_connect = true;
+                }
             }
+            
+            min_edges[i - MY_NODES_FROM] = min_edge;
         }
-        
-        min_edges[i - MY_NODES_FROM] = min_edge;
+
+        // Combine thread results atomically
+        if (thread_can_connect) {
+            #pragma omp atomic write
+            can_connect = true;
+        }
     }
 
     return can_connect;
@@ -392,6 +446,7 @@ static long calculate_mst_weight(int** min_graph, int** graph) {
 // Helper functions for MST iterations
 static Edge* initialize_edge_array(int size) {
     Edge* edges = malloc(size * sizeof(Edge));
+    #pragma omp simd
     for (int i = 0; i < size; i++) {
         edges[i] = (Edge){-1, -1, -1};
     }
@@ -399,17 +454,30 @@ static Edge* initialize_edge_array(int size) {
 }
 
 static void find_local_minimum_edges(int vertex_per_process, int** graph, int* lightest_edges) {
-    //#pragma omp parallel for
+    #pragma omp parallel for schedule(dynamic)
     for (int i = MY_NODES_FROM; i < MY_NODES_TO; i++) {
-        int min_id_to = find_lightest_edge(graph, i);
-        lightest_edges[i - MY_NODES_FROM] = min_id_to;
+        int local_min_weight = MAX_EDGE_VALUE;
+        int local_min_id = -1;
+        
+        // Enable vectorization for weight comparison
+        #pragma omp simd reduction(min:local_min_weight)
+        for (int j = 0; j < NODE_COUNT; j++) {
+            if (i == j) continue;
+            int weight = get_from_matrix(graph, i, j);
+            if (weight > 0 && weight < local_min_weight) {
+                local_min_weight = weight;
+                local_min_id = j;
+            }
+        }
+        
+        lightest_edges[i - MY_NODES_FROM] = local_min_id;
     }
 }
 
 static void gather_root_counts(int* parent, int* roots) {
-    //#pragma omp parallel for
+    #pragma omp parallel for
     for (int i = 0; i < NODE_COUNT; i++) {
-        //#pragma omp atomic
+        #pragma omp atomic
         roots[parent[i]]++;
     }
 }
@@ -433,26 +501,50 @@ void first_iteration_mst(int vertex_per_process, int** graph, int world_rank,
     // Allocate and find local minimum edges
     int* lightest_edges = calloc(vertex_per_process, sizeof(int));
     find_local_minimum_edges(vertex_per_process, graph, lightest_edges);
+    
+    time_print("1 find_local_minimum_edges", world_rank);
 
     // Gather results from all processes
     int* recv_values = malloc(NODE_COUNT * sizeof(int));
     minus_array(recv_values, NODE_COUNT);
 
-    time_print("1 min compute", world_rank);
+    time_print("1 before allgather", world_rank);
 
     MPI_Allgather(lightest_edges, vertex_per_process, MPI_INT,
                   recv_values, vertex_per_process, MPI_INT, MPI_COMM_WORLD);
 
-    time_print("1 allgather", world_rank);
+    time_print("1 after allgather", world_rank);
 
     // Update MST with gathered results
     update_min_graph_union_find(parent, rank, recv_values, min_graph);
     
+    time_print("1 update graph", world_rank);
+
     // Cleanup
     free(lightest_edges);
     free(recv_values);
 
-    time_print("1 update graph", world_rank);
+    time_print("1 cleanup", world_rank);
+
+}
+
+// Replace individual MPI_Allreduce calls with batch communication
+static void batch_process_components(Edge* min_edges, Edge* recv_buff, int* roots, int vertex_per_process, 
+                                  int* parent, MPI_Datatype MPI_EDGE, MPI_Op MPI_MIN_EDGE) {
+    // Prepare batch of edges for all components
+    Edge* batch_edges = malloc(NODE_COUNT * sizeof(Edge));
+    int batch_size = 0;
+    
+    for (int i = 0; i < NODE_COUNT; i++) {
+        if (roots[i] == 0) continue;
+        int root_i = find(parent, i);
+        batch_edges[batch_size++] = find_minimum_edge_for_root(min_edges, parent, root_i, vertex_per_process);
+    }
+    
+    // Single collective communication for all edges
+    MPI_Allreduce(batch_edges, recv_buff, batch_size, MPI_EDGE, MPI_MIN_EDGE, MPI_COMM_WORLD);
+    
+    free(batch_edges);
 }
 
 void subsequent_iterations_mst(int vertex_per_process, int* parent, int** graph,
@@ -461,42 +553,40 @@ void subsequent_iterations_mst(int vertex_per_process, int* parent, int** graph,
     // Initialize edge arrays
     Edge* min_edges = initialize_edge_array(vertex_per_process);
     Edge* recv_buff = initialize_edge_array(NODE_COUNT);
-    
+
+    time_print("2 init data structures", world_rank);
+
     // Find minimum components
     bool can_connect = find_min_components(parent, graph, min_edges);
-    
+
+
+    time_print("2 find_min_components", world_rank);
+
     // Count roots
     int* roots = calloc(NODE_COUNT, sizeof(int));
     gather_root_counts(parent, roots);
 
-    time_print("2 before all gather", world_rank);
+    time_print("2 alloc and gather_roots", world_rank);
 
     // Process each component
     if (can_connect) {
-        //#pragma omp parallel for schedule(dynamic)
-        for (int i = 0; i < NODE_COUNT; i++) {
-            if (roots[i] == 0) continue;
-
-            int root_i = find(parent, i);
-            Edge local_pair = find_minimum_edge_for_root(min_edges, parent, root_i, vertex_per_process);
-
-            Edge recv_val;
-                MPI_Allreduce(&local_pair, &recv_val, 1, MPI_EDGE, MPI_MIN_EDGE, MPI_COMM_WORLD);
-                recv_buff[root_i] = recv_val;
-        }
+        batch_process_components(min_edges, recv_buff, roots, vertex_per_process, 
+                               parent, MPI_EDGE, MPI_MIN_EDGE);
     }
 
-    time_print("2 All gather", world_rank);
+    time_print("2 finish batch_processing and communication", world_rank);
 
     // Update MST with gathered results
     update_min_graph_from_roots_not_id(parent, rank, recv_buff, graph, min_graph);
+
+    time_print("2 finish update_min_graph", world_rank);
     
     // Cleanup
     free(min_edges);
     free(recv_buff);
     free(roots);
 
-    time_print("2 updated min graph", world_rank);
+    time_print("2 cleanup", world_rank);
 }
 
 static void print_mst_edges(int** min_graph, int** graph) {
@@ -560,33 +650,11 @@ int main(int argc, char** argv) {
 
     time_print("Allocated stuff", world_rank);
 
-    // Main MST computation loop
-    int num_components = 0;
-    int count = 0;
-    while (1) {
-        // Process MST iterations
-        if (count == 0) {
-            first_iteration_mst(vertex_per_process, graph, world_rank, parent, rank, min_graph);
-        } else {
-            subsequent_iterations_mst(vertex_per_process, parent, graph, world_rank,
-                                   MPI_EDGE, MPI_MIN_EDGE, rank, min_graph);
-        }
 
-        // Update parent pointers and find number of components
-        //#pragma omp parallel for
-        for (int i = 0; i < NODE_COUNT; i++) {
-            find(parent, i);
-        }
-
-        time_print("Find root", world_rank);
-        num_components = find_num_components(parent);
-        
-        if (world_rank == 0) {
-            printf("Num components %d\n", num_components);
-        }
-
-        if (num_components == 1) break;
-        count++;
+    first_iteration_mst(vertex_per_process, graph, world_rank, parent, rank, min_graph);
+    while(find_num_components(parent) > 1) {
+        subsequent_iterations_mst(vertex_per_process, parent, graph, world_rank,
+            MPI_EDGE, MPI_MIN_EDGE, rank, min_graph);
     }
 
     // Print results
@@ -606,9 +674,8 @@ int main(int argc, char** argv) {
 
     free_matrix(min_graph);
     free_matrix(graph);
-    // Existing cleanup
+
+    // cleanup
     cleanup_resources(parent, rank, &MPI_EDGE, &MPI_MIN_EDGE);
     return 0;
 }
-
-
