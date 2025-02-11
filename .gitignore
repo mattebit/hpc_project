@@ -53,10 +53,16 @@ Module.symvers
 Mkfile.old
 dkms.conf
 
-*.txt
+
 
 #generated graph file
 large_graph.txt
+*.txt
 
 #settings.json
 .vscode/
+
+
+#output of hpc data
+hpc_cmp_impl.sh*
+parallel.sh*
