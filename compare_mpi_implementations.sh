@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # Compile both MPI implementations with optimization flags
-mpicc -std=c99 -O3 -march=native -mtune=native -ftree-vectorize -funroll-loops -flto -o src/main.o src/main.c
+mpicc -std=c99 -O3 -fopenmp -march=native -mtune=native -ftree-vectorize -funroll-loops -flto -o src/main.o src/main.c
 mpicc -std=c99 -O3 -fopenmp -march=native -mtune=native -ftree-vectorize -funroll-loops -flto -o src/new_main.o src/new_main.c
 
 # Create directory for results if it doesn't exist
@@ -27,13 +27,13 @@ for graph in $(ls graphs/graph_*_*.txt | sort -t_ -k2 -n); do
     
     # Run first implementation (main.c)
     echo "Running main.c implementation..."
-    main_output=$(mpirun -n 4 src/main.o "$num_vertices" "$graph")
+    main_output=$(mpirun -n 8 src/main.o "$num_vertices" "$graph")
     main_weight=$(get_mst_weight "$main_output")
     main_time=$(get_time "$main_output")
     
     # Run second implementation (new_main.c)
     echo "Running new_main.c implementation..."
-    new_main_output=$(mpirun -n 4 src/new_main.o "$num_vertices" "$graph")
+    new_main_output=$(mpirun -n 8 src/new_main.o "$num_vertices" "$graph")
     new_main_weight=$(get_mst_weight "$new_main_output")
     new_main_time=$(get_time "$new_main_output")
     
