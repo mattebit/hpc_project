@@ -62,11 +62,18 @@ Edge* generate_random_graph(uint64_t num_vertices, uint64_t num_edges, uint64_t*
     return edges;
 }
 
-void write_edges_to_file(const char* filename, Edge* edges, uint64_t num_edges) {
-    FILE* f = fopen(filename, "w");
-    if (!f) {
-        fprintf(stderr, "Cannot open file for writing\n");
-        return;
+void write_edges_to_file_or_stdout(const char* filename, Edge* edges, uint64_t num_edges) {
+    FILE* f = NULL;
+    
+    // If filename is NULL or empty, use stdout
+    if (filename == NULL || filename[0] == '\0') {
+        f = stdout;
+    } else {
+        f = fopen(filename, "w");
+        if (!f) {
+            fprintf(stderr, "Cannot open file for writing\n");
+            return;
+        }
     }
 
     uint64_t max_vertex = 0;
@@ -77,18 +84,21 @@ void write_edges_to_file(const char* filename, Edge* edges, uint64_t num_edges) 
     fprintf(f, "%lu %lu\n", max_vertex + 1, num_edges);
 
     for (uint64_t i = 0; i < num_edges; i++) {
-        fprintf(f, "%lu %lu %d\n",  // Changed %.6f to %d for integer weights
+        fprintf(f, "%lu %lu %d\n",
                 edges[i].start_vertex, 
                 edges[i].end_vertex, 
                 edges[i].weight);
     }
 
-    fclose(f);
+    if (f != stdout) {
+        fclose(f);
+    }
 }
 
 int main(int argc, char* argv[]) {
-    if (argc != 3) {
-        fprintf(stderr, "Usage: %s <NUM_VERTICES> <NUM_EDGES>\n", argv[0]);
+    if (argc != 3 && argc != 4) {
+        fprintf(stderr, "Usage: %s <NUM_VERTICES> <NUM_EDGES> [OUTPUT_FILE]\n", argv[0]);
+        fprintf(stderr, "If OUTPUT_FILE is not specified, output will be printed to stdout\n");
         return 1;
     }
 
@@ -107,8 +117,9 @@ int main(int argc, char* argv[]) {
     uint64_t actual_edges;
     Edge* edges = generate_random_graph(num_vertices, num_edges, &actual_edges);
 
-    // Write edges to file
-    write_edges_to_file("random_graph.txt", edges, actual_edges);
+    // Write edges to file or stdout
+    const char* output_file = (argc == 4) ? argv[3] : NULL;
+    write_edges_to_file_or_stdout(output_file, edges, actual_edges);
 
     // Cleanup
     free(edges);
