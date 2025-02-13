@@ -64,7 +64,8 @@ large_graph.txt
 
 
 #output of hpc data
-hpc_cmp_impl.sh*
+hpc_cmp_impl.sh.e*
+hpc_cmp_impl.sh.o*
 parallel.sh*
 
 #testing code
