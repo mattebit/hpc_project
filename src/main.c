@@ -10,6 +10,7 @@
 #include <sys/mman.h>
 #include <sys/stat.h>
 #include <fcntl.h>
+#include <stddef.h>
 
 //# define DEBUG
 # define LOGGING
@@ -18,7 +19,7 @@
 
 int NODE_COUNT = 20;
 char* GRAPH_PATH; // path of the graph to import
-int MAX_EDGE_VALUE = __INT_MAX__;
+uint16_t MAX_EDGE_VALUE = UINT16_MAX;
 
 int MY_NODES_FROM = 0;
 int MY_NODES_TO = 100;
@@ -27,7 +28,7 @@ double last_time = 0.0;
 double start_time = 0.0;
 
 typedef struct {
-    int weight;
+    uint16_t weight;
     int from;
     int to;
 } Edge;
@@ -46,8 +47,8 @@ typedef struct {
 } MPIContext;
 
 typedef struct {
-    int** graph;
-    int** min_graph;
+    uint16_t** graph;
+    uint16_t** min_graph;
     int* parent;
     int* rank;
     int vertex_per_process;
@@ -55,41 +56,7 @@ typedef struct {
 } MSTContext;
 
 
-void print_matrix_data(int** matrix, int** weight_matrix, PrintMode mode) {
-    switch (mode) {
-        case PRINT_NORMAL:
-            for (int i = 0; i < NODE_COUNT; i++) {
-                for (int j = 0; j < i; j++) {
-                    printf("%d ", get_from_matrix(matrix, i, j));
-                }
-                printf("\n");
-            }
-            break;
-            
-        case PRINT_FULL:
-            for (int i = 0; i < NODE_COUNT; i++) {
-                for (int j = 0; j < NODE_COUNT; j++) {
-                    printf("%d ", get_from_matrix(matrix, i, j));
-                }
-                printf("\n");
-            }
-            break;
-            
-        case PRINT_MST_EDGES:
-            printf("\nSelected MST Edges:\n");
-            printf("From -> To : Weight\n");
-            printf("-------------------\n");
-            for (int i = 0; i < NODE_COUNT; i++) {
-                for (int j = 0; j < i; j++) {
-                    if (get_from_matrix(matrix, i, j) == 1) {
-                        printf("%4d -> %4d : %d\n", i, j, 
-                               get_from_matrix(weight_matrix, i, j));
-                    }
-                }
-            }
-            break;
-    }
-}
+
 
 
 /**
@@ -134,59 +101,90 @@ void union_sets(int* parent, int* rank, int node1, int node2) {
     }
 }
 
-int** allocate_and_init_matrix() {
-    // Allocate contiguous block for all matrix data
-    int total_size = 0;
-    for (int i = 0; i < NODE_COUNT; i++) {
-        total_size += i + 1;
-    }
-    
-    int* data = (int*)calloc(total_size, sizeof(int));
-    if (!data) {
-        fprintf(stderr, "Failed to allocate matrix data\n");
-        exit(EXIT_FAILURE);
-    }
-    
+uint16_t** allocate_and_init_matrix() {
     // Allocate array of pointers
-    int** min_graph = (int**)malloc(NODE_COUNT * sizeof(int*));
-    if (!min_graph) {
-        free(data);
+    uint16_t** matrix = (uint16_t**)malloc(NODE_COUNT * sizeof(uint16_t*));
+    if (!matrix) {
         fprintf(stderr, "Failed to allocate matrix pointers\n");
         exit(EXIT_FAILURE);
     }
     
-    // Setup row pointers
-    int offset = 0;
+    // Allocate each row separately
     for (int i = 0; i < NODE_COUNT; i++) {
-        min_graph[i] = &data[offset];
-        offset += i + 1;
+        // Each row i needs (i+1) elements
+        matrix[i] = (uint16_t*)calloc(i + 1, sizeof(uint16_t));
+        if (!matrix[i]) {
+            // Cleanup previously allocated rows
+            for (int j = 0; j < i; j++) {
+                free(matrix[j]);
+            }
+            free(matrix);
+            fprintf(stderr, "Failed to allocate row %d\n", i);
+            exit(EXIT_FAILURE);
+        }
     }
     
-    return min_graph;
+    return matrix;
 }
 
+
 // Add this cleanup function
-void free_matrix(int** matrix) {
+void free_matrix(uint16_t** matrix) {
     if (matrix) {
         free(matrix[0]); // Free the contiguous data block
         free(matrix);    // Free the array of pointers
     }
 }
 
-int get_from_matrix(int** matrix, int row, int col) {
+uint16_t get_from_matrix(uint16_t** matrix, int row, int col) {
     return (row < col) ? matrix[col][row] : matrix[row][col];
 }
 
-void set_to_matrix(int** matrix, int row, int col, int value) {
+void set_to_matrix(uint16_t** matrix, int row, int col, uint16_t value) {
     if (row < col)
         matrix[col][row] = value;
     else
         matrix[row][col] = value;
 }
 
+void print_matrix_data(uint16_t** matrix, uint16_t** weight_matrix, PrintMode mode) {
+    switch (mode) {
+        case PRINT_NORMAL:
+            for (int i = 0; i < NODE_COUNT; i++) {
+                for (int j = 0; j < i; j++) {
+                    printf("%hd ", get_from_matrix(matrix, i, j));
+                }
+                printf("\n");
+            }
+            break;
+            
+        case PRINT_FULL:
+            for (int i = 0; i < NODE_COUNT; i++) {
+                for (int j = 0; j < NODE_COUNT; j++) {
+                    printf("%hd ", get_from_matrix(matrix, i, j));
+                }
+                printf("\n");
+            }
+            break;
+            
+        case PRINT_MST_EDGES:
+            printf("\nSelected MST Edges:\n");
+            printf("From -> To : Weight\n");
+            printf("-------------------\n");
+            for (int i = 0; i < NODE_COUNT; i++) {
+                for (int j = 0; j < i; j++) {
+                    if (get_from_matrix(matrix, i, j) == 1) {
+                        printf("%4d -> %4d : %hd\n", i, j, 
+                               get_from_matrix(weight_matrix, i, j));
+                    }
+                }
+            }
+            break;
+    }
+}
 
 
-int** readGraphFromFile(const char* filename) {
+uint16_t** readGraphFromFile(const char* filename) {
     // Open file with a large buffer for efficient reading
     FILE* file = fopen(filename, "r");
     if (!file) {
@@ -214,12 +212,13 @@ int** readGraphFromFile(const char* filename) {
     NODE_COUNT = V;
 
     // Allocate graph matrix
-    int** graph = allocate_and_init_matrix();
+    uint16_t** graph = allocate_and_init_matrix();
     
     // Read edges sequentially with buffered I/O
-    int src, dest, weight;
+    int src, dest;
+    uint16_t weight;
     for (int i = 0; i < E; i++) {
-        if (fscanf(file, "%d %d %d\n", &src, &dest, &weight) != 3) {
+        if (fscanf(file, "%d %d %hd\n", &src, &dest, &weight) != 3) {
             fprintf(stderr, "Error reading edge %d\n", i);
             free(buffer);
             fclose(file);
@@ -228,7 +227,7 @@ int** readGraphFromFile(const char* filename) {
         }
         
         // Update matrix only if new edge is lighter
-        int val = get_from_matrix(graph, src, dest);
+        uint16_t val = get_from_matrix(graph, src, dest);
         if (val == 0 || val > weight) {
             set_to_matrix(graph, src, dest, weight);
         }
@@ -240,21 +239,22 @@ int** readGraphFromFile(const char* filename) {
     return graph;
 }
 
-void update_min_graph_first_iter(int* parent, int * rank, int* min_values, int** min_graph) {
+void update_min_graph_first_iter(int* parent, int * rank, int* min_ids, uint16_t** min_graph) {
     // #pragma omp parallel for
     for (int i = 0; i < NODE_COUNT; i++) {
-        int weight = min_values[i];
-        if (weight > 0) {
-            union_sets(parent, rank, i, weight);
-            set_to_matrix(min_graph, i, weight, 1);
+        int min_id_to = min_ids[i];
+        if (min_id_to != -1) {
+            union_sets(parent, rank, i, min_id_to);
+            set_to_matrix(min_graph, i, min_id_to, 1);
         }
     }
 }
 
-void update_min_graph_subsequent_iter(int* parent, int* rank, Edge* root_mins, int** graph, int** min_graph) {
+void 
+update_min_graph_subsequent_iter(int* parent, int* rank, Edge* root_mins, uint16_t** graph, uint16_t** min_graph) {
     // Process edges in a consistent order
     for (int i = 0; i < NODE_COUNT; i++) {
-        if (root_mins[i].weight > 0 && root_mins[i].from != -1) {
+        if (root_mins[i].weight != MAX_EDGE_VALUE && root_mins[i].from != -1) {
             int root1 = find(parent, root_mins[i].from);
             int root2 = find(parent, root_mins[i].to);
             
@@ -309,7 +309,7 @@ void time_print(char* desc, int world_rank) {
 #endif
 }
 
-bool find_min_components(int* parent, int** graph, Edge* min_edges) {
+bool find_min_components(int* parent, uint16_t** graph, Edge* min_edges) {
     bool can_connect = false;
 
     // Use atomic to handle the shared can_connect variable
@@ -325,7 +325,7 @@ bool find_min_components(int* parent, int** graph, Edge* min_edges) {
             
             // Find minimum weight edge connecting to different component
             for (int j = 0; j < NODE_COUNT; j++) {
-                int weight = get_from_matrix(graph, i, j);
+                uint16_t weight = get_from_matrix(graph, i, j);
                 if (weight <= 0) continue; // Skip invalid edges
                 
                 int root_j = find(parent, j);
@@ -355,8 +355,8 @@ void min_edge_reduce(void* in, void* inout, int* len, MPI_Datatype* datatype) {
     Edge* in_edges = (Edge*)in;
     Edge* inout_edges = (Edge*)inout;
     for (int i = 0; i < *len; i++) {
-        if ((in_edges[i].weight != -1 || in_edges[i].weight != MAX_EDGE_VALUE) && 
-        (inout_edges[i].weight != -1 || inout_edges[i].weight != MAX_EDGE_VALUE) &&
+        if ((in_edges[i].weight != MAX_EDGE_VALUE || 
+        inout_edges[i].weight != MAX_EDGE_VALUE) &&
         in_edges[i].weight < inout_edges[i].weight) {
             inout_edges[i] = in_edges[i];
         }
@@ -402,7 +402,7 @@ static void setup_vertex_distribution(int process_count, int world_rank, int* ve
     MY_NODES_TO = MY_NODES_FROM + *vertex_per_process;
 }
 
-static long calculate_mst_weight(int** min_graph, int** graph) {
+static long calculate_mst_weight(uint16_t** min_graph, uint16_t** graph) {
     long final_mst_weight = 0;
     for (int i = 0; i < NODE_COUNT; i++) {
         for (int j = 0; j < i; j++) {  // Only check lower triangular part
@@ -419,22 +419,21 @@ static Edge* initialize_edge_array(int size) {
     Edge* edges = malloc(size * sizeof(Edge));
     #pragma omp simd
     for (int i = 0; i < size; i++) {
-        edges[i] = (Edge){-1, -1, -1};
+        edges[i] = (Edge){MAX_EDGE_VALUE, -1, -1};
     }
     return edges;
 }
 
-static void find_local_minimum_edges(int vertex_per_process, int** graph, int* lightest_edges) {
+static void find_local_minimum_edges(int vertex_per_process, uint16_t** graph, int* lightest_edges) {
     #pragma omp parallel for schedule(dynamic)
     for (int i = MY_NODES_FROM; i < MY_NODES_TO; i++) {
-        int local_min_weight = MAX_EDGE_VALUE;
+        uint16_t local_min_weight = MAX_EDGE_VALUE;
         int local_min_id = -1;
         
-        // Enable vectorization for weight comparison
-        #pragma omp simd reduction(min:local_min_weight)
+        // First find minimum weight without SIMD
         for (int j = 0; j < NODE_COUNT; j++) {
             if (i == j) continue;
-            int weight = get_from_matrix(graph, i, j);
+            uint16_t weight = get_from_matrix(graph, i, j);
             if (weight > 0 && weight < local_min_weight) {
                 local_min_weight = weight;
                 local_min_id = j;
@@ -457,21 +456,22 @@ static Edge find_minimum_edge_for_root(Edge* min_edges, int* parent, int root_i,
     Edge local_pair = {MAX_EDGE_VALUE, 0, 0};
     
     for (int j = 0; j < vertex_per_process; j++) {
-        if (min_edges[j].weight == -1 || min_edges[j].weight == MAX_EDGE_VALUE) continue;
+        if (min_edges[j].weight == MAX_EDGE_VALUE) continue;
         
         if (find(parent, min_edges[j].from) == root_i && 
             min_edges[j].weight < local_pair.weight) {
             local_pair = min_edges[j];
         }
+        
     }
     return local_pair;
 }
 
-void first_iteration_mst(int vertex_per_process, int** graph, int world_rank, 
-                        int* parent, int* rank, int** min_graph) {
+void first_iteration_mst(int vertex_per_process, uint16_t** graph, int world_rank, 
+                        int* parent, int* rank, uint16_t** min_graph) {
     // Allocate and find local minimum edges
-    int* lightest_edges = calloc(vertex_per_process, sizeof(int));
-    find_local_minimum_edges(vertex_per_process, graph, lightest_edges);
+    int* ids_lightest_edges = calloc(vertex_per_process, sizeof(int));
+    find_local_minimum_edges(vertex_per_process, graph, ids_lightest_edges);
     
     time_print("1 find_local_minimum_edges", world_rank);
 
@@ -481,7 +481,7 @@ void first_iteration_mst(int vertex_per_process, int** graph, int world_rank,
 
     time_print("1 before allgather", world_rank);
 
-    MPI_Allgather(lightest_edges, vertex_per_process, MPI_INT,
+    MPI_Allgather(ids_lightest_edges, vertex_per_process, MPI_INT,
                   recv_values, vertex_per_process, MPI_INT, MPI_COMM_WORLD);
 
     time_print("1 after allgather", world_rank);
@@ -492,7 +492,7 @@ void first_iteration_mst(int vertex_per_process, int** graph, int world_rank,
     time_print("1 update graph", world_rank);
 
     // Cleanup
-    free(lightest_edges);
+    free(ids_lightest_edges);
     free(recv_values);
 
     time_print("1 cleanup", world_rank);
@@ -508,8 +508,7 @@ static void batch_process_components(Edge* min_edges, Edge* recv_buff, int* root
     
     for (int i = 0; i < NODE_COUNT; i++) {
         if (roots[i] == 0) continue;
-        int root_i = find(parent, i);
-        batch_edges[batch_size++] = find_minimum_edge_for_root(min_edges, parent, root_i, vertex_per_process);
+        batch_edges[batch_size++] = find_minimum_edge_for_root(min_edges, parent, i, vertex_per_process);
     }
     
     // Single collective communication for all edges
@@ -518,9 +517,9 @@ static void batch_process_components(Edge* min_edges, Edge* recv_buff, int* root
     free(batch_edges);
 }
 
-void subsequent_iterations_mst(int vertex_per_process, int* parent, int** graph,
+void subsequent_iterations_mst(int vertex_per_process, int* parent, uint16_t** graph,
                              int world_rank, MPI_Datatype MPI_EDGE, MPI_Op MPI_MIN_EDGE,
-                             int* rank, int** min_graph) {
+                             int* rank, uint16_t** min_graph) {
     // Initialize edge arrays
     Edge* min_edges = initialize_edge_array(vertex_per_process);
     Edge* recv_buff = initialize_edge_array(NODE_COUNT);
@@ -569,10 +568,13 @@ void compute_mst(MSTContext* ctx) {
                        ctx->parent, ctx->rank, ctx->min_graph);
     
     // Subsequent iterations
-    while(find_num_components(ctx->parent) > 1) {
+    int num_components = NODE_COUNT;
+    while(num_components > 1) {
         subsequent_iterations_mst(ctx->vertex_per_process, ctx->parent, ctx->graph,
                                 ctx->mpi_ctx->world_rank, ctx->mpi_ctx->edge_type,
                                 ctx->mpi_ctx->min_edge_op, ctx->rank, ctx->min_graph);
+        num_components = find_num_components(ctx->parent);
+        if (ctx->mpi_ctx->world_rank == 0) printf("Components: %d\n", num_components);
     }
 }
 
@@ -582,10 +584,31 @@ MPIContext init_mpi_context(int argc, char** argv) {
     MPI_Comm_size(MPI_COMM_WORLD, &ctx.process_count);
     MPI_Comm_rank(MPI_COMM_WORLD, &ctx.world_rank);
     
-    // Setup custom types
-    MPI_Type_contiguous(3, MPI_INT, &ctx.edge_type);
+    // Setup custom type for Edge structure
+    int blocklengths[3] = {1, 1, 1};  // One of each field
+    MPI_Aint displacements[3];
+    MPI_Datatype types[3] = {MPI_UNSIGNED_SHORT, MPI_INT, MPI_INT};  // uint16_t maps to unsigned short
+    
+    // Calculate displacements
+    Edge temp;
+    MPI_Get_address(&temp.weight, &displacements[0]);
+    MPI_Get_address(&temp.from, &displacements[1]);
+    MPI_Get_address(&temp.to, &displacements[2]);
+    
+    // Make relative to first field
+    MPI_Aint base;
+    MPI_Get_address(&temp, &base);
+    for (int i = 0; i < 3; i++) {
+        displacements[i] = MPI_Aint_diff(displacements[i], base);
+    }
+    
+    // Create and commit the MPI datatype
+    MPI_Type_create_struct(3, blocklengths, displacements, types, &ctx.edge_type);
     MPI_Type_commit(&ctx.edge_type);
+    
+    // Create the reduction operation
     MPI_Op_create((MPI_User_function*)min_edge_reduce, 1, &ctx.min_edge_op);
+    
     start_time = MPI_Wtime();
     last_time = MPI_Wtime();
     
@@ -603,7 +626,7 @@ int main(int argc, char** argv) {
     // Parse command line arguments
     parse_command_line_args(argc, argv);
 
-    int** graph = readGraphFromFile(GRAPH_PATH);
+    uint16_t** graph = readGraphFromFile(GRAPH_PATH);
 
     MPIContext mpi_ctx = init_mpi_context(argc, argv);
     MSTContext mst_ctx = {
