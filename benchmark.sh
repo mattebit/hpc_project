@@ -43,7 +43,7 @@ for graph in ~/hpc_project/graphs/graph_*_*.txt; do
     
     # Run parallel implementation
     echo "Running parallel implementation..."
-    parallel_output=$(mpirun -n MPINUM ~/hpc_project/src/main.o "$num_vertices" "$graph")
+    parallel_output=$(mpirun.actual -n MPINUM ~/hpc_project/src/main.o "$num_vertices" "$graph")
     parallel_weight=$(echo "$parallel_output" | grep "MST Weight:" | head -n1 | grep -o '[0-9]\+')
     parallel_time=$(echo "$parallel_output" | grep "Computation Time:" | head -n1 | grep -o '[0-9.]\+')
     
