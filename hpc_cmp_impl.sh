@@ -9,8 +9,11 @@
 # Load MPI module
 module load mpich-3.2
 
+# Set number of OpenMP threads per MPI process
+export OMP_NUM_THREADS=32
+
 # Compile both implementations with optimization flags
-gcc -std=c99 -O3 ~/hpc_project/mst_boruvska_serial.c -o ~/hpc_project/serial.o
+gcc -std=c99 -O3 ~/hpc_project/serial.c -o ~/hpc_project/serial.o
 mpicc -std=c99 -O3 -fopenmp -march=native -mtune=native -ftree-vectorize -funroll-loops -flto -o ~/hpc_project/src/main.o ~/hpc_project/src/main.c
 
 # Function to extract MST weight from output
@@ -33,13 +36,13 @@ for graph in $(ls ~/hpc_project/graphs/graph_*_*.txt | sort -t_ -k2 -n); do
     
     # Run serial implementation
     echo "Running serial implementation..."
-    serial_output=$(~/hpc_project/serial.o "$graph")
+    serial_output=$(~/hpc_project/serial.o "$num_vertices" "$graph")
     serial_weight=$(get_mst_weight "$serial_output")
     serial_time=$(get_time "$serial_output")
     
     # Run parallel implementation
     echo "Running parallel implementation..."
-    parallel_output=$(mpirun.actual -n 16 ~/hpc_project/src/main.o "$num_vertices" "$graph")
+    parallel_output=$(mpirun.actual -n 32 ~/hpc_project/src/main.o "$num_vertices" "$graph")
     parallel_weight=$(get_mst_weight "$parallel_output")
     parallel_time=$(get_time "$parallel_output")
     

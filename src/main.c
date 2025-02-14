@@ -13,8 +13,8 @@
 #include <stddef.h>
 
 //# define DEBUG
-# define LOGGING
-# define DEBUG
+// # define LOGGING
+// # define DEBUG
 # define NULL ((void *)0)
 
 int NODE_COUNT = 20;
@@ -54,10 +54,6 @@ typedef struct {
     int vertex_per_process;
     MPIContext* mpi_ctx;
 } MSTContext;
-
-
-
-
 
 /**
  * Used to log a message
@@ -461,29 +457,29 @@ void first_iteration_mst(int vertex_per_process, uint16_t** graph, int world_ran
     int* ids_lightest_edges = calloc(vertex_per_process, sizeof(int));
     find_local_minimum_edges(vertex_per_process, graph, ids_lightest_edges);
     
-    time_print("1 find_local_minimum_edges", world_rank);
+    // time_print("1 find_local_minimum_edges", world_rank);
 
     // Gather results from all processes
     int* recv_values = malloc(NODE_COUNT * sizeof(int));
     minus_array(recv_values, NODE_COUNT);
 
-    time_print("1 before allgather", world_rank);
+    // time_print("1 before allgather", world_rank);
 
     MPI_Allgather(ids_lightest_edges, vertex_per_process, MPI_INT,
                   recv_values, vertex_per_process, MPI_INT, MPI_COMM_WORLD);
 
-    time_print("1 after allgather", world_rank);
+    // time_print("1 after allgather", world_rank);
 
     // Update MST with gathered results
     update_min_graph_first_iter(parent, rank, recv_values, min_graph);
     
-    time_print("1 update graph", world_rank);
+    // time_print("1 update graph", world_rank);
 
     // Cleanup
     free(ids_lightest_edges);
     free(recv_values);
 
-    time_print("1 cleanup", world_rank);
+    // time_print("1 cleanup", world_rank);
 
 }
 
@@ -512,10 +508,10 @@ void subsequent_iterations_mst(int vertex_per_process, int* parent, uint16_t** g
     Edge* min_edges = initialize_edge_array(vertex_per_process);
     Edge* recv_buff = initialize_edge_array(NODE_COUNT);
 
-    time_print("2 init data structures", world_rank);
+    // time_print("2 init data structures", world_rank);
 
     // Find minimum components
-    find_min_components(parent, graph, min_edges);
+    // find_min_components(parent, graph, min_edges);
 
     time_print("2 find_min_components", world_rank);
 
@@ -523,18 +519,18 @@ void subsequent_iterations_mst(int vertex_per_process, int* parent, uint16_t** g
     int* roots = calloc(NODE_COUNT, sizeof(int));
     gather_root_counts(parent, roots);
 
-    time_print("2 alloc and gather_roots", world_rank);
+    // time_print("2 alloc and gather_roots", world_rank);
 
     // Process each component
     batch_process_components(min_edges, recv_buff, roots, vertex_per_process, 
                             parent, MPI_EDGE, MPI_MIN_EDGE);
 
-    time_print("2 finish batch_processing and communication", world_rank);
+    // time_print("2 finish batch_processing and communication", world_rank);
 
     // Update MST with gathered results
     update_min_graph_subsequent_iter(parent, rank, recv_buff, graph, min_graph);
 
-    time_print("2 finish update_min_graph", world_rank);
+    // time_print("2 finish update_min_graph", world_rank);
     
     // Cleanup
     free(min_edges);
@@ -554,7 +550,7 @@ void compute_mst(MSTContext* ctx) {
     
     int num_components = NODE_COUNT;
     num_components = find_num_components(ctx->parent); // NOT remove, 
-    printf("[ID:%d] Components: %d\n", ctx->mpi_ctx->world_rank, num_components);
+    // printf("[ID:%d] Components: %d\n", ctx->mpi_ctx->world_rank, num_components);
 
     //if (ctx->mpi_ctx->world_rank == 0) print_matrix_data(ctx->min_graph, ctx->graph, PRINT_NORMAL);
 
@@ -564,8 +560,8 @@ void compute_mst(MSTContext* ctx) {
                                 ctx->mpi_ctx->world_rank, ctx->mpi_ctx->edge_type,
                                 ctx->mpi_ctx->min_edge_op, ctx->rank, ctx->min_graph);
         num_components = find_num_components(ctx->parent);
-        if (ctx->mpi_ctx->world_rank == 0) 
-            printf("[ID:%d] Components: %d\n", ctx->mpi_ctx->world_rank, num_components);
+        // if (ctx->mpi_ctx->world_rank == 0) 
+        //     printf("[ID:%d] Components: %d\n", ctx->mpi_ctx->world_rank, num_components);
     }
 }
 
@@ -633,7 +629,7 @@ int main(int argc, char** argv) {
         exit(EXIT_FAILURE);
     }
 
-    time_print("Allocated stuff", mpi_ctx.world_rank);
+    // time_print("Allocated stuff", mpi_ctx.world_rank);
 
     #ifdef LOGGING
     if (mpi_ctx.world_rank == 0) {
@@ -644,12 +640,12 @@ int main(int argc, char** argv) {
     // Setup vertex distribution
     setup_vertex_distribution(mpi_ctx.process_count, mpi_ctx.world_rank, 
         &mst_ctx.vertex_per_process);
-    printf("[ID:%d] MY_NODES_FROM = %d, MYN_NODES_TO= %d, VERTEX_PER_PROCESS = %d\n",
-           mpi_ctx.world_rank, MY_NODES_FROM, MY_NODES_TO, mst_ctx.vertex_per_process);
+    // printf("[ID:%d] MY_NODES_FROM = %d, MYN_NODES_TO= %d, VERTEX_PER_PROCESS = %d\n",
+    //        mpi_ctx.world_rank, MY_NODES_FROM, MY_NODES_TO, mst_ctx.vertex_per_process);
 
     
     compute_mst(&mst_ctx);
-    time_print("Finished computing MST", mpi_ctx.world_rank);
+    // time_print("Finished computing MST", mpi_ctx.world_rank);
     
     // Print results if root process
     if (mpi_ctx.world_rank == 0) {
