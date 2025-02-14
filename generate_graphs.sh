@@ -22,18 +22,18 @@ for v in "${VERTICES[@]}"; do
     
     # Generate sparse graph
     echo "  Generating sparse graph ($sparse_edges edges)..."
-    ./graph_generator $v $sparse_edges
-    mv random_graph.txt "graphs/graph_${v}_sparse.txt"
+    ./graph_generator $v $sparse_edges graphs/graph_${v}_sparse.txt
+    #mv random_graph.txt "graphs/graph_${v}_sparse.txt"
     
     # Generate medium density graph
     echo "  Generating medium graph ($medium_edges edges)..."
-    ./graph_generator $v $medium_edges
-    mv random_graph.txt "graphs/graph_${v}_medium.txt"
+    ./graph_generator $v $medium_edges graphs/graph_${v}_medium.txt
+    #mv random_graph.txt "graphs/graph_${v}_medium.txt"
     
     # Generate dense graph
     echo "  Generating dense graph ($dense_edges edges)..."
-    ./graph_generator $v $dense_edges
-    mv random_graph.txt "graphs/graph_${v}_dense.txt"
+    ./graph_generator $v $dense_edges graphs/graph_${v}_dense.txt
+    #mv random_graph.txt "graphs/graph_${v}_dense.txt"
 done
 
 echo "Graph generation complete!"

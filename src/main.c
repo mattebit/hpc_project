@@ -503,16 +503,15 @@ void first_iteration_mst(int vertex_per_process, uint16_t** graph, int world_ran
 static void batch_process_components(Edge* min_edges, Edge* recv_buff, int* roots, int vertex_per_process, 
                                   int* parent, MPI_Datatype MPI_EDGE, MPI_Op MPI_MIN_EDGE) {
     // Prepare batch of edges for all components
-    Edge* batch_edges = malloc(NODE_COUNT * sizeof(Edge));
-    int batch_size = 0;
-    
+    Edge* batch_edges = initialize_edge_array(NODE_COUNT);
+
     for (int i = 0; i < NODE_COUNT; i++) {
         if (roots[i] == 0) continue;
-        batch_edges[batch_size++] = find_minimum_edge_for_root(min_edges, parent, i, vertex_per_process);
+        batch_edges[i] = find_minimum_edge_for_root(min_edges, parent, i, vertex_per_process);
     }
     
     // Single collective communication for all edges
-    MPI_Allreduce(batch_edges, recv_buff, batch_size, MPI_EDGE, MPI_MIN_EDGE, MPI_COMM_WORLD);
+    MPI_Allreduce(batch_edges, recv_buff, NODE_COUNT, MPI_EDGE, MPI_MIN_EDGE, MPI_COMM_WORLD);
     
     free(batch_edges);
 }
