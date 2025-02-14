@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # Compile both implementations with optimization flags
-gcc -O3 mst_boruvska_serial.c -o serial.o
+gcc -O3 serial.c -o serial
 mpicc -std=c99 -O3 -fopenmp -march=native -mtune=native -ftree-vectorize -funroll-loops -flto -o src/main.o src/main.c
 
 # Create directory for results if it doesn't exist
@@ -27,7 +27,7 @@ for graph in $(ls graphs/graph_*_*.txt | sort -t_ -k2 -n); do
     
     # Run serial implementation
     echo "Running serial implementation..."
-    serial_output=$(./serial.o "$graph")
+    serial_output=$(./serial.o "$num_vertices" "$graph")
     serial_weight=$(get_mst_weight "$serial_output")
     serial_time=$(get_time "$serial_output")
     
