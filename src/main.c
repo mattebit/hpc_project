@@ -122,6 +122,11 @@ uint16_t** allocate_and_init_matrix() {
             fprintf(stderr, "Failed to allocate row %d\n", i);
             exit(EXIT_FAILURE);
         }
+
+        // init matrix with default value
+        for (int j =0; j<i; j++){
+            matrix[i][j] = MAX_EDGE_VALUE;
+        }
     }
     
     return matrix;
@@ -326,7 +331,7 @@ bool find_min_components(int* parent, uint16_t** graph, Edge* min_edges) {
             // Find minimum weight edge connecting to different component
             for (int j = 0; j < NODE_COUNT; j++) {
                 uint16_t weight = get_from_matrix(graph, i, j);
-                if (weight <= 0) continue; // Skip invalid edges
+                if (weight == MAX_EDGE_VALUE) continue; // Skip invalid edges
                 
                 int root_j = find(parent, j);
                 if (root_i != root_j && weight < min_edge.weight) {
@@ -434,7 +439,7 @@ static void find_local_minimum_edges(int vertex_per_process, uint16_t** graph, i
         for (int j = 0; j < NODE_COUNT; j++) {
             if (i == j) continue;
             uint16_t weight = get_from_matrix(graph, i, j);
-            if (weight > 0 && weight < local_min_weight) {
+            if (weight != MAX_EDGE_VALUE && weight < local_min_weight) {
                 local_min_weight = weight;
                 local_min_id = j;
             }
@@ -504,14 +509,15 @@ static void batch_process_components(Edge* min_edges, Edge* recv_buff, int* root
                                   int* parent, MPI_Datatype MPI_EDGE, MPI_Op MPI_MIN_EDGE) {
     // Prepare batch of edges for all components
     Edge* batch_edges = initialize_edge_array(NODE_COUNT);
+    int count = 0;
 
     for (int i = 0; i < NODE_COUNT; i++) {
         if (roots[i] == 0) continue;
-        batch_edges[i] = find_minimum_edge_for_root(min_edges, parent, i, vertex_per_process);
+        batch_edges[count++] = find_minimum_edge_for_root(min_edges, parent, i, vertex_per_process);
     }
-    
+
     // Single collective communication for all edges
-    MPI_Allreduce(batch_edges, recv_buff, NODE_COUNT, MPI_EDGE, MPI_MIN_EDGE, MPI_COMM_WORLD);
+    MPI_Allreduce(batch_edges, recv_buff, count, MPI_EDGE, MPI_MIN_EDGE, MPI_COMM_WORLD);
     
     free(batch_edges);
 }
@@ -566,14 +572,18 @@ void compute_mst(MSTContext* ctx) {
     first_iteration_mst(ctx->vertex_per_process, ctx->graph, ctx->mpi_ctx->world_rank,
                        ctx->parent, ctx->rank, ctx->min_graph);
     
-    // Subsequent iterations
     int num_components = NODE_COUNT;
+    num_components = find_num_components(ctx->parent); // NOT remove, 
+    printf("[ID:%d] Components: %d\n", ctx->mpi_ctx->world_rank, num_components);
+
+    // Subsequent iterations
     while(num_components > 1) {
         subsequent_iterations_mst(ctx->vertex_per_process, ctx->parent, ctx->graph,
                                 ctx->mpi_ctx->world_rank, ctx->mpi_ctx->edge_type,
                                 ctx->mpi_ctx->min_edge_op, ctx->rank, ctx->min_graph);
         num_components = find_num_components(ctx->parent);
-        if (ctx->mpi_ctx->world_rank == 0) printf("Components: %d\n", num_components);
+        //if (ctx->mpi_ctx->world_rank == 0) 
+        printf("[ID:%d] Components: %d\n", ctx->mpi_ctx->world_rank, num_components);
     }
 }
 
