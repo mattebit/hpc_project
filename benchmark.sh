@@ -20,7 +20,6 @@ sub_job() {
 #PBS -q short_cpuQ
 
 module load mpich-3.2
-export OMP_NUM_THREADS=OMPTH
 
 # Compile both implementations
 # gcc -std=c99 -O3 ~/hpc_project/serial.c -o ~/hpc_project/serial.o
@@ -41,7 +40,7 @@ for graph in ~/hpc_project/graphs/graph_*_*.txt; do
     
     # Run parallel implementation
     echo "Running parallel implementation..."
-    parallel_output=$(mpirun.actual -n MPINUM ~/hpc_project/src/main.o "$num_vertices" "$graph")
+    parallel_output=$(mpirun.actual -np MPINUM --bind-to none ~/hpc_project/src/main.o "$num_vertices" "$graph")
     parallel_weight=$(echo "$parallel_output" | grep "MST Weight:" | head -n1 | grep -o '[0-9]\+')
     parallel_time=$(echo "$parallel_output" | grep "Computation Time:" | head -n1 | grep -o '[0-9.]\+')
     
