@@ -21,15 +21,19 @@ all: clean compile submit
 compile:
 	@echo "Compiling serial implementation..."
 	$(CC) $(SERIAL_CFLAGS) $(SERIAL_SRC) -o $(SERIAL_EXE)
+	@chmod +x $(SERIAL_EXE)
 	@echo "Compiling parallel implementation..."
 	@. /etc/profile.d/modules.sh && module load mpich-3.2 && \
 	$(MPICC) $(PARALLEL_CFLAGS) $(PARALLEL_SRC) -o $(PARALLEL_EXE)
+	@chmod +x $(PARALLEL_EXE)
+	@echo "Setting permissions..."
+	@chmod 755 $(SERIAL_EXE) $(PARALLEL_EXE)
 
 # Clean old files
 clean:
 	@echo "Cleaning up old files..."
-	rm -f $(SERIAL_EXE) $(PARALLEL_EXE)
 	rm -f hpc_cmp_impl_*.sh
+	rm -f hpc_cmp_impl_mpi*
 	rm -f bench_*.log
 	rm -f parallel.sh.*
 
