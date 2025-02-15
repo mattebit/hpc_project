@@ -511,7 +511,7 @@ void subsequent_iterations_mst(int vertex_per_process, int* parent, uint16_t** g
     // time_print("2 init data structures", world_rank);
 
     // Find minimum components
-    // find_min_components(parent, graph, min_edges);
+    find_min_components(parent, graph, min_edges);
 
     time_print("2 find_min_components", world_rank);
 
