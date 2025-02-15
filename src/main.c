@@ -318,7 +318,7 @@ Edge min(Edge e1, Edge e2) {
 
 bool find_min_components(int* parent, uint16_t** graph, Edge* min_edges, int world_rank) {
     // Parallelize the outer loop since each iteration is independent
-    #pragma omp parallel for
+    #pragma omp parallel for schedule(static)
     for (int i = MY_NODES_FROM; i < MY_NODES_TO; i++) {
         int root_i = parent[i];
         Edge min_edge = {MAX_EDGE_VALUE, -1, -1};
@@ -335,8 +335,10 @@ bool find_min_components(int* parent, uint16_t** graph, Edge* min_edges, int wor
                 min_edge.to = j;
             }
         }
-        
-        min_edges[i - MY_NODES_FROM] = min_edge;
+        #pragma omp critical
+        {
+            min_edges[i - MY_NODES_FROM] = min_edge;
+        }
     }
 }
 
