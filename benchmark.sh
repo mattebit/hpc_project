@@ -16,17 +16,15 @@ sub_job() {
     cat << 'EOF' > hpc_cmp_impl_${job_name}.sh
 #!/bin/bash
 #PBS -l select=1:ncpus=NCPUS:mem=MEMGB
-#PBS -l walltime=1:00:00
+#PBS -l walltime=1:10:00
 #PBS -q short_cpuQ
 
 module load mpich-3.2
 export OMP_NUM_THREADS=OMPTH
-export OMP_PROC_BIND=true
-export OMP_PLACES=cores
 
 # Compile both implementations
-gcc -std=c99 -O3 ~/hpc_project/serial.c -o ~/hpc_project/serial.o
-mpicc -std=c99 -O3 -fopenmp -march=native -mtune=native -ftree-vectorize -funroll-loops -flto -o ~/hpc_project/src/main.o ~/hpc_project/src/main.c
+# gcc -std=c99 -O3 ~/hpc_project/serial.c -o ~/hpc_project/serial.o
+# mpicc -std=c99 -O3 -fopenmp -march=native -mtune=native -ftree-vectorize -funroll-loops -flto -o ~/hpc_project/src/main.o ~/hpc_project/src/main.c
 
 for graph in ~/hpc_project/graphs/graph_*_*.txt; do
     echo "============================================"
