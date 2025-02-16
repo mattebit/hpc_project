@@ -81,7 +81,7 @@ make watch-output  # View results
 ![OpenMP](https://img.shields.io/badge/OpenMP-Enabled-green?style=flat-square)
 ![PBS](https://img.shields.io/badge/PBS-Scheduler-orange?style=flat-square)
 
-## Cluster Configuration ⚡
+## Cluster Configuration
 
 | Resource | Specification |
 |----------|---------------|
