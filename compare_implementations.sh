@@ -27,13 +27,13 @@ for graph in $(ls graphs/graph_*_*.txt | sort -t_ -k2 -n); do
     
     # Run serial implementation
     echo "Running serial implementation..."
-    serial_output=$(./serial.o "$num_vertices" "$graph")
+    serial_output=$(./serial.o "$graph")
     serial_weight=$(get_mst_weight "$serial_output")
     serial_time=$(get_time "$serial_output")
     
     # Run parallel implementation
     echo "Running parallel implementation..."
-    parallel_output=$(mpirun -n 2 src/main.o "$num_vertices" "$graph")
+    parallel_output=$(mpirun -np 2 --bind-to none -x OMP_NUM_THREADS=4 src/main.o "$num_vertices" "$graph")
     parallel_weight=$(get_mst_weight "$parallel_output")
     parallel_time=$(get_time "$parallel_output")
     
