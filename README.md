@@ -80,7 +80,6 @@ make watch-output  # View results
 ![MPI](https://img.shields.io/badge/MPI-MPICH%203.2-blue?style=flat-square)
 ![OpenMP](https://img.shields.io/badge/OpenMP-Enabled-green?style=flat-square)
 ![GCC](https://img.shields.io/badge/GCC-Required-red?style=flat-square)
-![Python](https://img.shields.io/badge/Python-3.x-yellow?style=flat-square)
 ![PBS](https://img.shields.io/badge/PBS-Scheduler-orange?style=flat-square)
 
 ## Cluster Configuration ⚡
