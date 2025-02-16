@@ -28,11 +28,13 @@ This project delivers a scalable parallel implementation of MST algorithms desig
 
 ```bash
 ├── src/
-│   └── main.c            # Parallel MPI+OpenMP implementation
-├── serial.c              # Serial implementation
-├── graph_generator.sh     # Test graph generator
-├── utils/               # Analysis tools
-└── scripts/             # Automation scripts
+│   └── main.c                      # Parallel MPI+OpenMP implementation
+├── serial.c                        # Serial implementation
+├── graph_generator.sh              # Test graph generator
+├── utils/                          # Analysis tools
+├── Makefile                        # Build, test and monitor automation (HPC settings)  
+├── compare_mpi_implementations.sh  # Test different MPI implementations (local)
+└── compare_implementations.sh      # Compare parallel vs serial (local)
 ```
 
 ## Build & Run
