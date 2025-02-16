@@ -12,8 +12,9 @@
 #include <fcntl.h>
 #include <stddef.h>
 
-//# define LOGGING
 //# define DEBUG
+// # define LOGGING
+// # define DEBUG
 # define NULL ((void *)0)
 
 int NODE_COUNT = 20;
@@ -239,7 +240,8 @@ uint16_t** readGraphFromFile(const char* filename) {
     return graph;
 }
 
-void update_min_graph_first_iter(int* parent, int * rank, int* min_ids, uint16_t** min_graph, uint16_t** graph) {
+void update_min_graph_first_iter(int* parent, int * rank, int* min_ids, uint16_t** min_graph) {
+    // #pragma omp parallel for
     for (int i = 0; i < NODE_COUNT; i++) {
         int min_id_to = min_ids[i];
         if (min_id_to != -1) {
@@ -266,6 +268,7 @@ update_min_graph_subsequent_iter(int* parent, int* rank, Edge* root_mins, uint16
 }
 
 void minus_array(int* array, int size) {
+    // #pragma omp simd
     for (int i = 0; i < size; i++) {
         array[i] = -1;
     }
@@ -307,20 +310,11 @@ void time_print(char* desc, int world_rank) {
 #endif
 }
 
-// minimum functions for OMP reductions
-void combinerMin(Edge *out, Edge const *in) {
-    *out = out->weight < in->weight ? *out : *in;
-}
-
-Edge min(Edge e1, Edge e2) {
-    return e1.weight < e2.weight ? e1 : e2;
-}
-
-bool find_min_components(int* parent, uint16_t** graph, Edge* min_edges, int world_rank) {
+bool find_min_components(int* parent, uint16_t** graph, Edge* min_edges) {
     // Parallelize the outer loop since each iteration is independent
-    #pragma omp parallel for schedule(static)
+    #pragma omp for schedule(static)
     for (int i = MY_NODES_FROM; i < MY_NODES_TO; i++) {
-        int root_i = parent[i];
+        int root_i = find(parent, i);
         Edge min_edge = {MAX_EDGE_VALUE, -1, -1};
         
         // Find minimum weight edge connecting to different component
@@ -328,17 +322,15 @@ bool find_min_components(int* parent, uint16_t** graph, Edge* min_edges, int wor
             uint16_t weight = get_from_matrix(graph, i, j);
             if (weight == MAX_EDGE_VALUE) continue; // Skip invalid edges
             
-            int root_j = parent[j];
+            int root_j = find(parent, j);
             if (root_i != root_j && weight < min_edge.weight) {
                 min_edge.weight = weight;
                 min_edge.from = i;
                 min_edge.to = j;
             }
         }
-        #pragma omp critical
-        {
-            min_edges[i - MY_NODES_FROM] = min_edge;
-        }
+        
+        min_edges[i - MY_NODES_FROM] = min_edge;
     }
 }
 
@@ -446,6 +438,7 @@ static void gather_root_counts(int* parent, int* roots) {
 
 static Edge find_minimum_edge_for_root(Edge* min_edges, int* parent, int root_i, int vertex_per_process) {
     Edge local_pair = {MAX_EDGE_VALUE, 0, 0};
+    
     for (int j = 0; j < vertex_per_process; j++) {
         if (min_edges[j].weight == MAX_EDGE_VALUE) continue;
         
@@ -453,6 +446,7 @@ static Edge find_minimum_edge_for_root(Edge* min_edges, int* parent, int root_i,
             min_edges[j].weight < local_pair.weight) {
             local_pair = min_edges[j];
         }
+        
     }
     return local_pair;
 }
@@ -477,7 +471,7 @@ void first_iteration_mst(int vertex_per_process, uint16_t** graph, int world_ran
     time_print("1 after allgather", world_rank);
 
     // Update MST with gathered results
-    update_min_graph_first_iter(parent, rank, recv_values, min_graph, graph);
+    update_min_graph_first_iter(parent, rank, recv_values, min_graph);
     
     time_print("1 update graph", world_rank);
 
@@ -517,7 +511,7 @@ void subsequent_iterations_mst(int vertex_per_process, int* parent, uint16_t** g
     time_print("2 init data structures", world_rank);
 
     // Find minimum components
-    find_min_components(parent, graph, min_edges, world_rank);
+    find_min_components(parent, graph, min_edges);
 
     time_print("2 find_min_components", world_rank);
 
